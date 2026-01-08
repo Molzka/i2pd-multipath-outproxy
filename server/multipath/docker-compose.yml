@@ -31,7 +31,7 @@ services:
 
     sing-box:
         image: gzxhwq/sing-box:server
-        restart: unless-stopped
+        restart: always
         network_mode: host
         volumes:
           - ./sing-box-config.json:/etc/sing-box/config.json
