@@ -38,8 +38,9 @@
       "auto_route": true,
       "strict_route": true,
       "stack": "gvisor",
+      "domain_strategy": "ipv4_only",
       "sniff": true,
-      "sniff_override_destination": false
+      "sniff_override_destination": true
     }
   ],
   "outbounds": [
@@ -50,6 +51,7 @@
       "server_port": 1081,
       "version": "5",
       "tcp_fast_open": true,
+      "tcp_multi_path": true,
       "udp_over_tcp": { "enabled": true, "version": 2 }
     },
     {
