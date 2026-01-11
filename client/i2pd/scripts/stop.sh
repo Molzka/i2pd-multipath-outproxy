@@ -1,2 +1,2 @@
 #!/bin/sh
-docker-compose down -t0
+docker-compose kill
