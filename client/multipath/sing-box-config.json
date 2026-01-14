@@ -51,7 +51,7 @@
       "server_port": 1081,
       "version": "5",
       "tcp_fast_open": true,
-      "tcp_multi_path": true,
+      "tcp_multi_path": false,
       "udp_over_tcp": { "enabled": true, "version": 2 }
     },
     {
