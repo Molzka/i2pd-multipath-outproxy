@@ -13,7 +13,7 @@ outbound.length=4
 inbound.lengthVariance=-1
 outbound.lengthVariance=-1
 gzip=true
-i2p.streaming.initialAckDelay=200
+i2p.streaming.initialAckDelay=2
 i2p.streaming.profile=2
 i2p.streaming.maxWindowSize=512
 i2p.streaming.answerPings=false
@@ -21,5 +21,5 @@ crypto.ratchet.inboundTags=3200
 """.format(index, 3000+index, index)
 
 import random
-for i in range(1, 33):
+for i in range(1, 51):
     print(gen(i))
