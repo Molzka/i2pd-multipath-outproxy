@@ -39,3 +39,7 @@ services:
           - NET_ADMIN
         devices:
           - /dev/net/tun
+        ulimits:
+          nofile:
+            soft: 655350
+            hard: 655350
