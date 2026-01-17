@@ -3,7 +3,7 @@
   	"cache_file": {
   	  "enabled": true,
   	  "path": "cache.db",
-  	  "store_fakeip": true,
+  	  "store_fakeip": false,
   	  "store_rdrc": true,
   	  "rdrc_timeout": "6h"
   	}
@@ -13,6 +13,8 @@
     "timestamp": true
   },
   "dns": {
+    "disable_expire": true,
+    "cache_capacity": 16000,
 	"servers": [
       {
         "tag": "quad",
