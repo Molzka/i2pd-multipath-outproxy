@@ -21,9 +21,6 @@ RUN apk --no-cache --virtual build-dependendencies add \
   miniupnpc \
   miniupnpc-dev
 
-# COPY conf/ /i2pd/conf/
-# COPY network/ /i2pd/network/
-
 # install deps && build i2p binary
 RUN mkdir -p /i2pd/data/addressbook \
   && mkdir /i2pd/tunnels.null \
@@ -38,8 +35,8 @@ COPY ./my.patch /tmp/i2pd/my.patch
 RUN cd /tmp/i2pd && git apply my.patch
 
 RUN cd /tmp/i2pd/build \
-  && cmake -DWITH_AESNI=ON -DWITH_UPNP=ON . \
-  && make -j $(nproc) \
+  && DEBUG=no cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Ofast -march=native" -DWITH_AESNI=ON -DWITH_UPNP=ON . \
+  && DEBUG=no make DEBUG=no -j $(nproc) \
   && strip i2pd
 
 FROM alpine:3
@@ -61,17 +58,7 @@ RUN mkdir -p /i2pd/data/addressbook \
   && mkdir /i2pd/bin
 
 COPY --from=builder /tmp/i2pd/build/i2pd /i2pd/bin/i2pd
-#COPY --from=builder /tmp/i2pd/LICENSE /i2pd/LICENSE
-#COPY --from=builder /tmp/i2pd/ChangeLog /i2pd/ChangeLog
 COPY --from=builder /tmp/i2pd/contrib/certificates /i2pd/data/certificates
-
-#COPY conf/ /i2pd/conf/
-#COPY network/ /i2pd/network/
-#COPY htdocs/ /i2pd/htdocs/
-#COPY entrypoint.sh /
-# cp /i2pd/conf/addresses-initial.org.csv /i2pd/data/addressbook/addresses.csv \
-#   && chmod +x /entrypoint.sh \
-
 
 RUN addgroup -g 1000 i2pd \
   && adduser -u 1000 -G i2pd -s /bin/sh -h "/i2pd" -D i2pd \
