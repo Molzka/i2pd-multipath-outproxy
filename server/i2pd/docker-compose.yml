@@ -3,11 +3,15 @@ services:
         image: myi2pd:latest
         container_name: myi2pd
         network_mode: host
-        restart: always
         user: i2pd
+        restart: always
         ulimits:
           nofile:
-            soft: 655350
-            hard: 655350
+            soft: 1655350
+            hard: 1655350
         volumes:
             - ./data:/home/i2pd/data:z
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true

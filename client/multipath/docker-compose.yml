@@ -11,6 +11,11 @@ services:
             hard: 655350
         volumes:
             - ./multipath.cfg:/multipath/multipath.cfg:ro
+        read_only: true
+        cap_drop:
+            - ALL
+        security_opt:
+          - no-new-privileges:true
 
     haproxy:
         image: haproxy:latest
@@ -23,3 +28,8 @@ services:
             hard: 655350
         volumes:
             - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+        read_only: true
+        cap_drop:
+            - ALL
+        security_opt:
+          - no-new-privileges:true

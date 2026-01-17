@@ -7,7 +7,11 @@ services:
         restart: always
         ulimits:
           nofile:
-            soft: 6553500
-            hard: 6553500
+            soft: 1655350
+            hard: 1655350
         volumes:
             - ./data:/home/i2pd/data:z
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
