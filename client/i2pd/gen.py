@@ -16,7 +16,7 @@ gzip=true
 i2p.streaming.initialAckDelay=10
 i2p.streaming.profile=2
 i2p.streaming.maxWindowSize=512
-i2p.streaming.answerPings=false
+i2p.streaming.answerPings=true
 crypto.ratchet.inboundTags=3200
 """.format(index, 3000+index, index)
 
