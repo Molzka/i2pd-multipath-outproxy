@@ -12,7 +12,7 @@ Demo video: https://webm.red/view/9A6I.webm
 - `sudo apt install git docker docker-compose` Go to the your VPS and install requirements
 - `git clone https://github.com/f7124has/i2pd-multipath-outproxy.git` Clone the repo
 - `cd i2pd-multipath-outproxy/server/i2pd && ./scripts/build.sh && sudo chown -R 1000:1000 ./data && ./scripts/run.sh` Build docker image for i2pd and start it
-- `lynx 'http://127.0.0.1:7070/?page=i2p_tunnels'` Find your `.b32.i2p` address here. Save it, you will need it later to launch the client (looks like `tr26d3g4hviaqufmld6r16ikpdvjvd6g5qwdemnbuffck2fh663a.b32.i2p` and called `outproxy`)
+- `lynx 'http://127.0.0.1:7070/?page=i2p_tunnels'` Find your `.b32.i2p` address here. Save it, you will need it later to launch the client (looks like Encrypted B33 `tr26d3g4hviaqufmld6r16ikpdvjvd6g5qwdemnbuffck2fh663a.b32.i2p` and called `outproxy`)
 - `cd ../multipath && ./scripts/build.sh && ./scripts/run.sh` Build aggligator (multipath) docker image and haproxy and start it
 - `docker ps` Verify is all containers are started and work normaly
 
