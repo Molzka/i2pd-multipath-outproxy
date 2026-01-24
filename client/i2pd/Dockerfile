@@ -29,7 +29,10 @@ RUN mkdir -p /i2pd/data/addressbook \
   && mkdir /i2pd/bin
 
 RUN cd /tmp \
-  && git clone --depth 1 --branch 2.58.0 https://github.com/PurpleI2P/i2pd.git
+	&& git clone --depth 1 https://github.com/PurpleI2P/i2pd.git \
+	&& cd i2pd \
+	&& git reset --hard fef25d75791d3018fcdf1b253dcee23525cdb416 \
+	&& git clean -df
 
 COPY ./my.patch /tmp/i2pd/my.patch
 RUN cd /tmp/i2pd && git apply my.patch
@@ -59,6 +62,7 @@ RUN mkdir -p /i2pd/data/addressbook \
 
 COPY --from=builder /tmp/i2pd/build/i2pd /i2pd/bin/i2pd
 COPY --from=builder /tmp/i2pd/contrib/certificates /i2pd/data/certificates
+COPY --from=builder /tmp/i2pd/contrib/certificates /i2pd_certificates
 
 RUN addgroup -g 1000 i2pd \
   && adduser -u 1000 -G i2pd -s /bin/sh -h "/i2pd" -D i2pd \
