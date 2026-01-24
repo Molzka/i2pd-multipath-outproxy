@@ -13,6 +13,7 @@ outbound.length=4
 inbound.lengthVariance=-1
 outbound.lengthVariance=-1
 gzip=true
+i2p.streaming.maxResends=1
 i2p.streaming.initialAckDelay=10
 i2p.streaming.profile=2
 i2p.streaming.maxWindowSize=512
