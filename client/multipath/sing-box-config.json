@@ -22,13 +22,13 @@
         "detour": "proxy"
       },
       {
-        "tag": "google-doh",
-        "address": "https://dns.google/dns-query",
+        "tag": "quad-doh",
+        "address": "https://9.9.9.9/dns-query",
         "detour": "proxy"
       }
     ],
     "strategy": "ipv4_only",
-    "final": "quad"
+    "final": "quad-doh"
   },
   "inbounds": [
     {
