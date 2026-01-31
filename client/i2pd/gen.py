@@ -14,12 +14,12 @@ inbound.lengthVariance=-1
 outbound.lengthVariance=-1
 gzip=true
 i2p.streaming.maxResends=1
-i2p.streaming.initialAckDelay=50
+i2p.streaming.initialAckDelay=200
 i2p.streaming.profile=2
 i2p.streaming.maxWindowSize=512
-i2p.streaming.answerPings=true
+i2p.streaming.answerPings=false
 i2cp.dontPublishLeaseSet=true
-crypto.ratchet.inboundTags=3200
+crypto.ratchet.inboundTags=400
 """.format(index, 3000+index, index)
 
 import random
