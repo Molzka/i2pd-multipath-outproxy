@@ -43,8 +43,8 @@ index bb3300a..b93c1b5 100644
  					if (host.is_unspecified () || other.host.is_unspecified ()) return false;
 -					if (host.is_v4 () && other.host.is_v4 ()) return !std::memcmp (host.to_v4 ().to_bytes ().data (), other.host.to_v4 ().to_bytes ().data (), 3); // /24
 -					if (host.is_v6 () && other.host.is_v6 ()) return !std::memcmp (host.to_v6 ().to_bytes ().data (), other.host.to_v6 ().to_bytes ().data (), 7); // /56
-+					if (host.is_v4 () && other.host.is_v4 ()) return !std::memcmp (host.to_v4 ().to_bytes ().data (), other.host.to_v4 ().to_bytes ().data (), 2); // /24
-+					if (host.is_v6 () && other.host.is_v6 ()) return !std::memcmp (host.to_v6 ().to_bytes ().data (), other.host.to_v6 ().to_bytes ().data (), 4); // /56
++					if (host.is_v4 () && other.host.is_v4 ()) return !std::memcmp (host.to_v4 ().to_bytes ().data (), other.host.to_v4 ().to_bytes ().data (), 1); // /24
++					if (host.is_v6 () && other.host.is_v6 ()) return !std::memcmp (host.to_v6 ().to_bytes ().data (), other.host.to_v6 ().to_bytes ().data (), 2); // /56
  					return false;
  				}
  			};
@@ -57,7 +57,7 @@ index 49bfd28..772c441 100644
  	const size_t COMPRESSION_THRESHOLD_SIZE = 66;
  	const int MAX_NUM_RESEND_ATTEMPTS = 10;
 -	const int INITIAL_WINDOW_SIZE = 10;
-+	const int INITIAL_WINDOW_SIZE = 32;
++	const int INITIAL_WINDOW_SIZE = 64;
  	const int MIN_WINDOW_SIZE = 3;
  	const int MAX_WINDOW_SIZE = 512;
  	const int MAX_WINDOW_SIZE_INC_PER_RTT = 512; // TODO: remove
