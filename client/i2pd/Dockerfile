@@ -28,18 +28,17 @@ RUN mkdir -p /i2pd/data/addressbook \
   && mkdir /i2pd/tunnels.conf.d \
   && mkdir /i2pd/bin
 
-# ea705bcdef490246be2e700ad81bb555442722bc
 RUN cd /tmp \
 	&& git clone --depth 1 https://github.com/PurpleI2P/i2pd.git \
 	&& cd i2pd \
-	&& git reset --hard 78763830f3a6d85fd34001d1df9cd74da0959306 \
+	&& git reset --hard c63f87eb22194cbf68bfd117f1e43e1cfc44c728 \
 	&& git clean -df
 
 COPY ./my.patch /tmp/i2pd/my.patch
 RUN cd /tmp/i2pd && git apply my.patch && echo patched
 
 RUN cd /tmp/i2pd/build \
-  && DEBUG=no cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Ofast -march=native" -DWITH_AESNI=ON -DWITH_UPNP=ON . \
+  && DEBUG=no cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Wl,-z,reiro -Wl,-z,now -D_FORTIFY_SOURCE=2 -Ofast -march=native -fstack-protector-strong -fstrict-flex-arrays" -DWITH_AESNI=ON -DWITH_UPNP=ON -DWITH_HARDENING=ON . \
   && DEBUG=no make DEBUG=no -j $(nproc) \
   && strip i2pd
 
