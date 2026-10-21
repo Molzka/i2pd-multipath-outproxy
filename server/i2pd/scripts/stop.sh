@@ -1,2 +1,5 @@
 #!/bin/sh
-docker-compose kill
+set -e
+cd "$(dirname "$0")/.."
+. ../../scripts/compose.sh
+compose down

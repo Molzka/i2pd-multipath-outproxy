@@ -1,48 +1,22 @@
 {
-  "experimental": {
-  	"cache_file": {
-  	  "enabled": true,
-  	  "path": "cache.db",
-  	  "store_fakeip": false,
-  	  "store_rdrc": true,
-  	  "rdrc_timeout": "6h"
-  	}
-  },
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
+  "log": { "level": "info", "timestamp": true },
   "dns": {
-    "disable_expire": true,
-    "cache_capacity": 16000,
-	"servers": [
-      {
-        "tag": "quad",
-        "address": "udp://9.9.9.9",
-        "detour": "proxy"
-      },
-      {
-        "tag": "quad-doh",
-        "address": "https://9.9.9.9/dns-query",
-        "detour": "proxy"
-      }
+    "servers": [
+      { "type": "https", "tag": "doh", "server": "9.9.9.9", "detour": "proxy" }
     ],
     "strategy": "ipv4_only",
-    "final": "quad-doh"
+    "final": "doh"
   },
   "inbounds": [
     {
       "type": "tun",
       "tag": "tun-in",
       "interface_name": "tun0",
-      "address": "198.18.0.1/16",
-      "mtu": 65535,
+      "address": ["198.18.0.1/16"],
+      "mtu": 9000,
       "auto_route": true,
       "strict_route": true,
-      "stack": "gvisor",
-      "domain_strategy": "ipv4_only",
-      "sniff": true,
-      "sniff_override_destination": true
+      "stack": "gvisor"
     }
   ],
   "outbounds": [
@@ -51,24 +25,17 @@
       "tag": "proxy",
       "server": "192.168.100.207",
       "server_port": 1081,
-      "version": "5",
-      "tcp_fast_open": true,
-      "tcp_multi_path": false,
-      "udp_over_tcp": { "enabled": true, "version": 2 }
+      "version": "5"
     },
-    {
-      "type": "direct",
-      "tag": "direct-out"
-    }
+    { "type": "direct", "tag": "direct-out" }
   ],
   "route": {
     "rules": [
-      {
-        "protocol": "dns",
-        "action": "hijack-dns"
-      }
+      { "action": "sniff" },
+      { "protocol": "dns", "action": "hijack-dns" }
     ],
     "final": "proxy",
-	"auto_detect_interface": true
+    "auto_detect_interface": true,
+    "default_domain_resolver": "doh"
   }
 }

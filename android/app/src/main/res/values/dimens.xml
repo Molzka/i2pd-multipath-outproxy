@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="s2">8dp</dimen>
+    <dimen name="s3">12dp</dimen>
+    <dimen name="s4">16dp</dimen>
+    <dimen name="s5">24dp</dimen>
+    <dimen name="s6">32dp</dimen>
+    <dimen name="s7">48dp</dimen>
+    <dimen name="gutter">24dp</dimen>
+    <dimen name="content_max">560dp</dimen>
+
+    <dimen name="radius">6dp</dimen>
+    <dimen name="border">1dp</dimen>
+    <dimen name="focus_ring">2dp</dimen>
+    <dimen name="touch">48dp</dimen>
+    <dimen name="button_h">56dp</dimen>
+    <dimen name="bundle_h">172dp</dimen>
+
+    <dimen name="t_display">32sp</dimen>
+    <dimen name="t_body">15sp</dimen>
+    <dimen name="t_small">13sp</dimen>
+    <dimen name="t_label">12sp</dimen>
+    <dimen name="t_stat">18sp</dimen>
+    <dimen name="t_log">11sp</dimen>
+
+    <integer name="anim_link">700</integer>
+    <integer name="anim_exit">900</integer>
+</resources>

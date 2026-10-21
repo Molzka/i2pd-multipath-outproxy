@@ -1,4 +1,6 @@
 #!/bin/sh
-./scripts/stop.sh
-sleep 3
-docker-compose up -d 
+set -e
+cd "$(dirname "$0")/.."
+. ../../scripts/compose.sh
+compose up -d --remove-orphans
+compose ps

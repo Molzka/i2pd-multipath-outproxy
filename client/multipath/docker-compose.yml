@@ -1,35 +1,49 @@
-services:
-    multipath:
-        image: mymultipath:latest
-        container_name: mymultipath
-        network_mode: host
-        restart: always
-        command: /multipath/agg-tunnel --cfg /multipath/multipath.cfg client --tcp 127.0.0.1:3001 --tcp 127.0.0.1:3002 --tcp 127.0.0.1:3003 --tcp 127.0.0.1:3004 --tcp 127.0.0.1:3005 --tcp 127.0.0.1:3006 --tcp 127.0.0.1:3007 --tcp 127.0.0.1:3008 --tcp 127.0.0.1:3009 --tcp 127.0.0.1:3010 --tcp 127.0.0.1:3011 --tcp 127.0.0.1:3012 --tcp 127.0.0.1:3013 --tcp 127.0.0.1:3014 --tcp 127.0.0.1:3015 --tcp 127.0.0.1:3016 --tcp 127.0.0.1:3017 --tcp 127.0.0.1:3018 --tcp 127.0.0.1:3019 --tcp 127.0.0.1:3020 --tcp 127.0.0.1:3021 --tcp 127.0.0.1:3022 --tcp 127.0.0.1:3023 --tcp 127.0.0.1:3024 --tcp 127.0.0.1:3025 --tcp 127.0.0.1:3026 --tcp 127.0.0.1:3027 --tcp 127.0.0.1:3028 --tcp 127.0.0.1:3029 --tcp 127.0.0.1:3030 --tcp 127.0.0.1:3031 --tcp 127.0.0.1:3032 -p 1080 --tcp-link-filter none -4 -n
-        ulimits:
-          nofile:
-            soft: 655350
-            hard: 655350
-        volumes:
-            - ./multipath.cfg:/multipath/multipath.cfg:ro
-        read_only: true
-        cap_drop:
-            - ALL
-        security_opt:
-          - no-new-privileges:true
+x-hardening: &hardening
+  network_mode: host
+  restart: unless-stopped
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  ulimits:
+    nofile:
+      soft: 65535
+      hard: 65535
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "3"
 
-    haproxy:
-        image: haproxy:latest
-        container_name: haproxy
-        network_mode: host
-        restart: always
-        ulimits:
-          nofile:
-            soft: 655350
-            hard: 655350
-        volumes:
-            - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-        read_only: true
-        cap_drop:
-            - ALL
-        security_opt:
-          - no-new-privileges:true
+services:
+  multipath:
+    <<: *hardening
+    build:
+      context: ../..
+      dockerfile: multipath/Dockerfile
+    image: mymultipath:latest
+    container_name: mymultipath
+    command: >-
+      agg-tunnel --cfg /etc/multipath.cfg client
+      --tcp 127.0.0.1:3001 --tcp 127.0.0.1:3002 --tcp 127.0.0.1:3003 --tcp 127.0.0.1:3004
+      --tcp 127.0.0.1:3005 --tcp 127.0.0.1:3006 --tcp 127.0.0.1:3007 --tcp 127.0.0.1:3008
+      --tcp 127.0.0.1:3009 --tcp 127.0.0.1:3010 --tcp 127.0.0.1:3011 --tcp 127.0.0.1:3012
+      --tcp 127.0.0.1:3013 --tcp 127.0.0.1:3014 --tcp 127.0.0.1:3015 --tcp 127.0.0.1:3016
+      --tcp 127.0.0.1:3017 --tcp 127.0.0.1:3018 --tcp 127.0.0.1:3019 --tcp 127.0.0.1:3020
+      --tcp 127.0.0.1:3021 --tcp 127.0.0.1:3022 --tcp 127.0.0.1:3023 --tcp 127.0.0.1:3024
+      --tcp 127.0.0.1:3025 --tcp 127.0.0.1:3026 --tcp 127.0.0.1:3027 --tcp 127.0.0.1:3028
+      --tcp 127.0.0.1:3029 --tcp 127.0.0.1:3030 --tcp 127.0.0.1:3031 --tcp 127.0.0.1:3032
+      -p 1080 -p 1081:1090
+      --tcp-link-filter none -4 -n
+    volumes:
+      - ./multipath.cfg:/etc/multipath.cfg:ro
+
+  i2pmux:
+    <<: *hardening
+    image: mymultipath:latest
+    pull_policy: never
+    container_name: myi2pmux
+    depends_on:
+      - multipath
+    command: i2pmux socks -listen ${SOCKS_LISTEN:-127.0.0.1:1081} -upstream 127.0.0.1:1090

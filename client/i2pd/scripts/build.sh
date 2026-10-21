@@ -1,3 +1,5 @@
 #!/bin/sh
-docker rmi -f "myi2pd:latest" || true
-docker build -t "myi2pd:latest" .
+set -e
+cd "$(dirname "$0")/.."
+. ../../scripts/compose.sh
+compose build --pull

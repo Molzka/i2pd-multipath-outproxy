@@ -1,8 +1,8 @@
 diff --git a/libi2pd/NetDb.hpp b/libi2pd/NetDb.hpp
-index 5af0ae4..90afd43 100644
+index 358e003..66283a4 100644
 --- a/libi2pd/NetDb.hpp
 +++ b/libi2pd/NetDb.hpp
-@@ -38,14 +38,14 @@ namespace i2p
+@@ -39,14 +39,14 @@ namespace i2p
  {
  namespace data
  {
@@ -16,12 +16,12 @@ index 5af0ae4..90afd43 100644
  	const int NETDB_TUNNEL_CREATION_RATE_THRESHOLD = 10; // in %
  	const int NETDB_CHECK_FOR_EXPIRATION_UPTIME = 600; // 10 minutes, in seconds
 -	const int NETDB_FLOODFILL_EXPIRATION_TIMEOUT = 60 * 60; // 1 hour, in seconds
-+	const int NETDB_FLOODFILL_EXPIRATION_TIMEOUT = 60 * 60 * 10; // 1 hour, in seconds
++	const int NETDB_FLOODFILL_EXPIRATION_TIMEOUT = 60 * 60 * 10; // 10 hours, in seconds
  	const int NETDB_MIN_EXPIRATION_TIMEOUT = 90 * 60; // 1.5 hours
  	const int NETDB_MAX_EXPIRATION_TIMEOUT = 27 * 60 * 60; // 27 hours
  	const int NETDB_MAX_OFFLINE_EXPIRATION_TIMEOUT = 180; // in days
 diff --git a/libi2pd/NetDbRequests.cpp b/libi2pd/NetDbRequests.cpp
-index 94633e1..e70a138 100644
+index 88ee6f7..5b4968d 100644
 --- a/libi2pd/NetDbRequests.cpp
 +++ b/libi2pd/NetDbRequests.cpp
 @@ -518,7 +518,7 @@ namespace data
@@ -34,7 +34,7 @@ index 94633e1..e70a138 100644
  			if (numRouters)
  			{	
 diff --git a/libi2pd/RouterInfo.h b/libi2pd/RouterInfo.h
-index bb3300a..b93c1b5 100644
+index be9cbcc..9968f0b 100644
 --- a/libi2pd/RouterInfo.h
 +++ b/libi2pd/RouterInfo.h
 @@ -190,8 +190,8 @@ namespace data
@@ -43,17 +43,17 @@ index bb3300a..b93c1b5 100644
  					if (host.is_unspecified () || other.host.is_unspecified ()) return false;
 -					if (host.is_v4 () && other.host.is_v4 ()) return !std::memcmp (host.to_v4 ().to_bytes ().data (), other.host.to_v4 ().to_bytes ().data (), 3); // /24
 -					if (host.is_v6 () && other.host.is_v6 ()) return !std::memcmp (host.to_v6 ().to_bytes ().data (), other.host.to_v6 ().to_bytes ().data (), 7); // /56
-+					if (host.is_v4 () && other.host.is_v4 ()) return !std::memcmp (host.to_v4 ().to_bytes ().data (), other.host.to_v4 ().to_bytes ().data (), 1); // /24
-+					if (host.is_v6 () && other.host.is_v6 ()) return !std::memcmp (host.to_v6 ().to_bytes ().data (), other.host.to_v6 ().to_bytes ().data (), 2); // /56
++					if (host.is_v4 () && other.host.is_v4 ()) return !std::memcmp (host.to_v4 ().to_bytes ().data (), other.host.to_v4 ().to_bytes ().data (), 1); // /8
++					if (host.is_v6 () && other.host.is_v6 ()) return !std::memcmp (host.to_v6 ().to_bytes ().data (), other.host.to_v6 ().to_bytes ().data (), 2); // /16
  					return false;
  				}
  			};
 diff --git a/libi2pd/Streaming.h b/libi2pd/Streaming.h
-index 49bfd28..772c441 100644
+index b2659b2..31e2262 100644
 --- a/libi2pd/Streaming.h
 +++ b/libi2pd/Streaming.h
-@@ -59,7 +59,7 @@ namespace stream
- #endif
+@@ -56,7 +56,7 @@ namespace stream
+ 
  	const size_t COMPRESSION_THRESHOLD_SIZE = 66;
  	const int MAX_NUM_RESEND_ATTEMPTS = 10;
 -	const int INITIAL_WINDOW_SIZE = 10;
@@ -61,3 +61,18 @@ index 49bfd28..772c441 100644
  	const int MIN_WINDOW_SIZE = 3;
  	const int MAX_WINDOW_SIZE = 512;
  	const int MAX_WINDOW_SIZE_INC_PER_RTT = 512; // TODO: remove
+diff --git a/libi2pd/TunnelPool.cpp b/libi2pd/TunnelPool.cpp
+index 3fd50b8..0be09e2 100644
+--- a/libi2pd/TunnelPool.cpp
++++ b/libi2pd/TunnelPool.cpp
+@@ -850,8 +850,8 @@ namespace tunnel
+ 				if (newTunnel)
+ 				{
+ 					newTunnel->SetTunnelPool (shared_from_this ());
+-					if (tunnel->IsEstablished ()) // zero hops
+-						TunnelCreated (tunnel);
++					if (newTunnel->IsEstablished ()) // zero hops
++						TunnelCreated (newTunnel);
+ 				}
+ 			}
+ 		}

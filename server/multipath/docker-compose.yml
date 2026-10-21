@@ -1,35 +1,42 @@
+x-hardening: &hardening
+  network_mode: host
+  restart: unless-stopped
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  ulimits:
+    nofile:
+      soft: 65535
+      hard: 65535
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "3"
+
 services:
-    multipath:
-        image: mymultipath:latest
-        container_name: mymultipath
-        network_mode: host
-        restart: always
-        #  --tcp-link-filter none
-        command: /multipath/agg-tunnel --cfg /multipath/multipath.cfg server --tcp 1337 -p 1080 -n
-        ulimits:
-          nofile:
-            soft: 655350
-            hard: 655350
-        volumes:
-            - ./multipath.cfg:/multipath/multipath.cfg:ro
-        read_only: true
-        cap_drop:
-            - ALL
-        security_opt:
-          - no-new-privileges:true
+  multipath:
+    <<: *hardening
+    build:
+      context: ../..
+      dockerfile: multipath/Dockerfile
+    image: mymultipath:latest
+    container_name: mymultipath
+    command: >-
+      agg-tunnel --cfg /etc/multipath.cfg server
+      --tcp 1337 --tcp-bind 127.0.0.1
+      -p 1080 -p 1081 -n
+    volumes:
+      - ./multipath.cfg:/etc/multipath.cfg:ro
 
-
-    sing-box:
-        image: gzxhwq/sing-box:server
-        restart: always
-        network_mode: host
-        volumes:
-          - ./sing-box-config.json:/etc/sing-box/config.json
-        cap_add:
-          - NET_ADMIN
-        devices:
-          - /dev/net/tun
-        ulimits:
-          nofile:
-            soft: 655350
-            hard: 655350
+  i2pmux:
+    <<: *hardening
+    image: mymultipath:latest
+    pull_policy: never
+    container_name: myi2pmux
+    depends_on:
+      - multipath
+    command: >-
+      i2pmux server -listen 127.0.0.1:1081 -socks 127.0.0.1:1080 -ipv4-only

@@ -1,3 +1,5 @@
 #!/bin/sh
-docker rmi -f "mymultipath:latest" || true
-docker build -t "mymultipath:latest" .
+set -e
+cd "$(dirname "$0")/.."
+. ../../scripts/compose.sh
+compose build --pull

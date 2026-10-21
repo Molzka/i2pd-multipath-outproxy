@@ -1,17 +1,24 @@
 services:
-    i2pd:
-        image: myi2pd:latest
-        container_name: myi2pd
-        network_mode: host
-        user: i2pd
-        restart: always
-        ulimits:
-          nofile:
-            soft: 1655350
-            hard: 1655350
-        volumes:
-            - ./data:/home/i2pd/data:z
-        cap_drop:
-            - ALL
-        security_opt:
-            - no-new-privileges:true
+  i2pd:
+    build: ../../i2pd
+    image: myi2pd:latest
+    container_name: myi2pd
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - ./data:/home/i2pd/data:z
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"

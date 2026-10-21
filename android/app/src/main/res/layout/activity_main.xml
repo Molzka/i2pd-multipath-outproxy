@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="HardcodedText"
+    android:id="@+id/scroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:scrollbarStyle="outsideOverlay">
+
+    <LinearLayout
+        android:id="@+id/content"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/gutter"
+        android:paddingEnd="@dimen/gutter"
+        android:paddingTop="@dimen/s5"
+        android:paddingBottom="@dimen/s7">
+
+        <TextView
+            style="@style/Text.Wordmark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/wordmark" />
+
+        <org.multipath.outproxy.BundleView
+            android:id="@+id/bundle"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/bundle_h"
+            android:layout_marginTop="@dimen/s5"
+            android:importantForAccessibility="yes" />
+
+        <TextView
+            android:id="@+id/phase"
+            style="@style/Text.Display"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s5"
+            android:accessibilityLiveRegion="polite" />
+
+        <TextView
+            android:id="@+id/detail"
+            style="@style/Text.Help"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:minLines="2"
+            android:textSize="@dimen/t_body" />
+
+        <Button
+            android:id="@+id/toggle"
+            style="@style/Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s5" />
+
+        <LinearLayout
+            android:id="@+id/stats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s5"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <LinearLayout style="@style/StatCell">
+                <TextView android:id="@+id/stat_down" style="@style/Text.Stat" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                <TextView style="@style/Text.StatLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_down" />
+            </LinearLayout>
+            <LinearLayout style="@style/StatCell">
+                <TextView android:id="@+id/stat_up" style="@style/Text.Stat" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                <TextView style="@style/Text.StatLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_up" />
+            </LinearLayout>
+            <LinearLayout style="@style/StatCell">
+                <TextView android:id="@+id/stat_rtt" style="@style/Text.Stat" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                <TextView style="@style/Text.StatLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_rtt" />
+            </LinearLayout>
+            <LinearLayout style="@style/StatCell">
+                <TextView android:id="@+id/stat_time" style="@style/Text.Stat" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                <TextView style="@style/Text.StatLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/stat_time" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <View style="@style/Rule" android:layout_marginTop="@dimen/s6" />
+
+        <TextView
+            style="@style/Text.Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s5"
+            android:text="@string/section_server" />
+
+        <EditText
+            android:id="@+id/address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:autofillHints=""
+            android:background="@drawable/field"
+            android:fontFamily="@font/plex_mono_regular"
+            android:hint="@string/server_hint"
+            android:imeOptions="actionDone"
+            android:importantForAutofill="no"
+            android:inputType="textMultiLine|textNoSuggestions"
+            android:maxLines="3"
+            android:minHeight="@dimen/touch"
+            android:textColor="@color/text"
+            android:textSize="@dimen/t_small" />
+
+        <TextView
+            android:id="@+id/address_help"
+            style="@style/Text.Help"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:text="@string/server_help" />
+
+        <TextView
+            style="@style/Text.Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s6"
+            android:text="@string/section_router" />
+
+        <RadioGroup
+            android:id="@+id/router"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:orientation="horizontal">
+            <RadioButton android:id="@+id/router_builtin" style="@style/SegmentCell" android:text="@string/router_builtin" />
+            <RadioButton android:id="@+id/router_external" style="@style/SegmentCell.Last" android:text="@string/router_external" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/router_help"
+            style="@style/Text.Help"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2" />
+
+        <LinearLayout
+            android:id="@+id/external_box"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/sam_state"
+                style="@style/Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:accessibilityLiveRegion="polite"
+                android:textSize="@dimen/t_small" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s3"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/sam_fix"
+                    style="@style/Button.Quiet"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/sam_fix" />
+                <Button
+                    android:id="@+id/open_i2pd"
+                    style="@style/Button.Quiet"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/s2"
+                    android:layout_weight="1"
+                    android:text="@string/open_i2pd" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            style="@style/Text.Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s6"
+            android:text="@string/section_tunnels" />
+
+        <TextView
+            style="@style/Text.Body"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:text="@string/links_label" />
+
+        <RadioGroup
+            android:id="@+id/links"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:orientation="horizontal">
+            <RadioButton android:id="@+id/links_8" style="@style/SegmentCell" android:text="8" />
+            <RadioButton android:id="@+id/links_16" style="@style/SegmentCell" android:text="16" />
+            <RadioButton android:id="@+id/links_24" style="@style/SegmentCell" android:text="24" />
+            <RadioButton android:id="@+id/links_32" style="@style/SegmentCell.Last" android:text="32" />
+        </RadioGroup>
+
+        <TextView
+            style="@style/Text.Help"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:text="@string/links_help" />
+
+        <TextView
+            style="@style/Text.Body"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s5"
+            android:text="@string/hops_label" />
+
+        <RadioGroup
+            android:id="@+id/hops"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:orientation="horizontal">
+            <RadioButton android:id="@+id/hops_1" style="@style/SegmentCell" android:text="1" />
+            <RadioButton android:id="@+id/hops_2" style="@style/SegmentCell" android:text="2" />
+            <RadioButton android:id="@+id/hops_3" style="@style/SegmentCell.Last" android:text="3" />
+        </RadioGroup>
+
+        <TextView
+            style="@style/Text.Help"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:text="@string/hops_help" />
+
+        <TextView
+            android:id="@+id/locked"
+            style="@style/Text.Help"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:text="@string/settings_locked"
+            android:textColor="@color/accent"
+            android:visibility="gone" />
+
+        <View style="@style/Rule" android:layout_marginTop="@dimen/s6" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s4"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button
+                android:id="@+id/log_toggle"
+                style="@style/Button.Quiet"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/log_show" />
+            <Button
+                android:id="@+id/log_copy"
+                style="@style/Button.Quiet"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/s2"
+                android:text="@string/log_copy"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:background="@drawable/field"
+            android:fontFamily="@font/plex_mono_regular"
+            android:lineSpacingMultiplier="1.2"
+            android:textColor="@color/text_dim"
+            android:textIsSelectable="true"
+            android:textSize="@dimen/t_log"
+            android:visibility="gone" />
+    </LinearLayout>
+</ScrollView>

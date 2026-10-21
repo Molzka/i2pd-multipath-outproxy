@@ -1,0 +1,76 @@
+diff --git a/src/bin/agg-tunnel.rs b/src/bin/agg-tunnel.rs
+index 4e747a7..27299b7 100644
+--- a/src/bin/agg-tunnel.rs
++++ b/src/bin/agg-tunnel.rs
+@@ -8,7 +8,7 @@ use socket2::SockRef;
+ use std::{
+     collections::{HashMap, HashSet},
+     io::stdout,
+-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
++    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+     path::PathBuf,
+     process::exit,
+     sync::Arc,
+@@ -285,10 +285,14 @@ impl ClientCli {
+                 let listener_v4 = TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), client_port))
+                     .await
+                     .context(format!("cannot bind to local IPv4 port {client_port}"))?;
+-                let listener_v6 = TcpListener::bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), client_port))
+-                    .await
+-                    .context(format!("cannot bind to local IPv6 port {client_port}"))?;
+-                vec![listener_v4, listener_v6]
++                // no ::1 on some systems
++                match TcpListener::bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), client_port)).await {
++                    Ok(listener_v6) => vec![listener_v4, listener_v6],
++                    Err(err) => {
++                        eprintln!("IPv6 loopback port {client_port} unavailable ({err}), using IPv4 only");
++                        vec![listener_v4]
++                    }
++                }
+             };
+ 
+             let control_tx = control_tx.clone();
+@@ -432,6 +436,9 @@ pub struct ServerCli {
+     /// TCP port to listen on.
+     #[arg(long)]
+     tcp: Option<u16>,
++    /// IP address to bind the TCP listener to (default: all interfaces).
++    #[arg(long, default_value = "::")]
++    tcp_bind: IpAddr,
+     /// RFCOMM channel number to listen on.
+     #[cfg(feature = "bluer")]
+     #[arg(long)]
+@@ -478,7 +485,7 @@ impl ServerCli {
+         let mut server_ports = Vec::new();
+ 
+         if let Some(port) = self.tcp {
+-            match TcpAcceptor::new([SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)]).await {
++            match TcpAcceptor::new([SocketAddr::new(self.tcp_bind, port)]).await {
+                 Ok(tcp) => {
+                     server_ports.push(format!("TCP {tcp}"));
+                     acceptor.add(tcp);
+@@ -653,9 +660,9 @@ impl ServerCli {
+ }
+ 
+ async fn forward(mut read: impl AsyncRead + Unpin, mut write: impl AsyncWrite + Unpin) -> Result<()> {
++    // reuse the buffer
++    let mut buf = vec![0; 65_536];
+     loop {
+-        let mut buf = vec![0; 65_536];
+-
+         #[allow(clippy::unused_io_amount)] // workaround for clippy bug, IO amount is handled
+         let n = match FLUSH_DELAY {
+             Some(delay) => select! {
+@@ -670,11 +677,9 @@ async fn forward(mut read: impl AsyncRead + Unpin, mut write: impl AsyncWrite +
+ 
+         if n == 0 {
+             break;
+-        } else {
+-            buf.truncate(n);
+         }
+ 
+-        write.write_all(&buf).await?;
++        write.write_all(&buf[..n]).await?;
+     }
+ 
+     write.flush().await?;
