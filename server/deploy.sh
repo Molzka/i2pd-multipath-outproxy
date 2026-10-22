@@ -3,66 +3,38 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SERVER="$ROOT/server"
-DATA="$SERVER/i2pd/data"
+ADDRESS="$SERVER/OUTPROXY_ADDRESS.txt"
 
-log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
+log() { printf '%s\n' "$*"; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
 
-[ "$(id -u)" = 0 ] || die "run as root: sudo sh $0"
-
-if ! command -v docker >/dev/null 2>&1; then
-    log "installing Docker (get.docker.com)"
-    command -v curl >/dev/null 2>&1 || { apt-get update -q && apt-get install -yq curl ca-certificates; }
-    curl -fsSL https://get.docker.com | sh
-fi
-systemctl enable --now docker >/dev/null 2>&1 || true
-docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1 || {
-    log "installing the docker compose plugin"
-    apt-get update -q && apt-get install -yq docker-compose-plugin || apt-get install -yq docker-compose-v2
-}
+for tool in docker curl ss; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool is required; install it before running this script"
+done
 . "$ROOT/scripts/compose.sh"
-
-mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-swap_kb=$(awk '/SwapTotal/ {print $2}' /proc/meminfo)
-if [ $((mem_kb + swap_kb)) -lt 2500000 ] && [ ! -f /swapfile ]; then
-    log "low memory ($((mem_kb / 1024)) MB): creating 2 GB /swapfile"
-    fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
-    chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
-    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+docker info >/dev/null 2>&1 || die "Docker is unavailable; check that it is running and accessible to your user"
+if [ -e "$ADDRESS" ]; then
+    [ -w "$ADDRESS" ] || die "$ADDRESS is not writable; change its owner before running this script"
+else
+    [ -w "$SERVER" ] || die "$SERVER is not writable; check the project directory owner and permissions"
 fi
 
-modprobe tcp_bbr 2>/dev/null || true
-{
-    echo "net.ipv4.tcp_notsent_lowat = 131072"
-    echo "net.core.default_qdisc = fq"
-    grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control && echo "net.ipv4.tcp_congestion_control = bbr"
-    echo "net.core.rmem_max = 4194304"
-    echo "net.core.wmem_max = 4194304"
-} > /etc/sysctl.d/90-outproxy.conf
-sysctl -q -p /etc/sysctl.d/90-outproxy.conf || true
-
+umask 077
 ENVF="$SERVER/i2pd/.env"
-port=$(sed -n 's/^I2PD_PORT=\([0-9]*\)$/\1/p' "$ENVF" 2>/dev/null || true)
-if [ -z "$port" ]; then
+if [ -e "$ENVF" ]; then
+    [ -r "$ENVF" ] || die "$ENVF is not readable; check its owner and permissions"
+    port=$(sed -n 's/^I2PD_PORT=\([0-9]*\)$/\1/p' "$ENVF")
+    case "$port" in
+        ''|*[!0-9]*) die "set I2PD_PORT to a port from 1 to 65535 in $ENVF" ;;
+    esac
+    [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die "I2PD_PORT must be between 1 and 65535"
+else
     port=$(awk 'BEGIN { srand(); print int(10000 + rand() * 20000) }')
-    echo "I2PD_PORT=$port" > "$ENVF"
+    printf 'I2PD_PORT=%s\n' "$port" > "$ENVF"
 fi
 log "i2pd transport port: $port (tcp+udp)"
 
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-    log "ufw: allowing $port/tcp+udp"
-    ufw allow "$port/tcp" >/dev/null
-    ufw allow "$port/udp" >/dev/null
-elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-    log "firewalld: allowing $port/tcp+udp"
-    firewall-cmd -q --permanent --add-port="$port/tcp" --add-port="$port/udp" && firewall-cmd -q --reload
-fi
-
-chown -R 1000:1000 "$DATA"
-chmod 700 "$DATA"
-
-log "building images (first run takes 10-20 minutes)"
+log "building images"
 (cd "$SERVER/i2pd" && compose build --pull)
 (cd "$SERVER/multipath" && compose build --pull)
 
@@ -79,17 +51,12 @@ if ss -ltn | awk '{print $4}' | grep -Eq '^(0\.0\.0\.0|\[::\]|\*):(1337|1080|108
 fi
 log "local services are up (127.0.0.1:1337 agg-tunnel, :1080 SOCKS, :1081 mux)"
 
-if command -v curl >/dev/null 2>&1; then
-    ip=$(curl -s --max-time 20 --socks5-hostname 127.0.0.1:1080 https://api.ipify.org || true)
-    [ -n "$ip" ] && log "exit IP through the local SOCKS: $ip" || warn "test request through 127.0.0.1:1080 failed"
-fi
-
 log "waiting for i2pd to publish the outproxy address (can take a few minutes)"
 b33() {
-    b32=$(curl -s --max-time 5 'http://127.0.0.1:7070/?page=i2p_tunnels' 2>/dev/null \
+    b32=$(curl --noproxy '*' -s --max-time 5 'http://127.0.0.1:7070/?page=i2p_tunnels' 2>/dev/null \
         | grep -oE 'local_destination&(amp;)?b32=[a-z2-7]{52}"?>multipath<' | grep -oE '[a-z2-7]{52}' | head -n1)
     [ -n "$b32" ] || return 0
-    curl -s --max-time 5 "http://127.0.0.1:7070/?page=local_destination&b32=$b32" 2>/dev/null \
+    curl --noproxy '*' -s --max-time 5 "http://127.0.0.1:7070/?page=local_destination&b32=$b32" 2>/dev/null \
         | grep -oE '[a-z2-7]{55,}\.b32\.i2p' | head -n1
 }
 addr=""
@@ -102,8 +69,8 @@ while [ $i -lt 120 ]; do
 done
 [ -n "$addr" ] || die "address not found yet; re-run this script later or open the web console: ssh -L 7070:127.0.0.1:7070 root@<vps>, http://127.0.0.1:7070/?page=i2p_tunnels -> multipath -> Encrypted B33 address"
 
-echo "$addr" > "$SERVER/OUTPROXY_ADDRESS.txt"
-chmod 600 "$SERVER/OUTPROXY_ADDRESS.txt"
+printf '%s\n' "$addr" > "$ADDRESS"
+chmod 600 "$ADDRESS"
 
 echo
 echo "address: $addr"

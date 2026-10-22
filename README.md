@@ -21,17 +21,24 @@ Android VPN и Linux SOCKS5 через несколько параллельны
 
 ## Сервер
 
-На VPS с Debian или Ubuntu:
+На Linux VPS нужны Git, curl, `ss` (пакет iproute2), [Docker Engine](https://docs.docker.com/engine/install/) и [Compose](https://docs.docker.com/compose/install/linux/). Docker должен быть запущен и доступен пользователю, который запускает скрипт.
+
+Для первой установки:
 
 ```sh
 git clone https://github.com/Molzka/i2pd-multipath-outproxy.git
 cd i2pd-multipath-outproxy
-sudo sh server/deploy.sh
+printf 'I2PD_PORT=17656\n' > server/i2pd/.env
+sudo chown -R 1000:1000 server/i2pd/data
+sudo chmod 700 server/i2pd/data
+sh server/deploy.sh
 ```
 
-Скрипт установит Docker, соберёт и запустит контейнеры. Адрес сервера появится в терминале и в `server/OUTPROXY_ADDRESS.txt`. Не публикуйте его: отдельного пароля нет.
+`17656` — пример свободного порта для i2pd. Если на VPS или у хостера включён файрвол, разрешите этот порт по TCP и UDP вручную. UID 1000 нужен контейнеру для записи ключей и данных роутера.
 
-Для обновления выполните `git pull --ff-only` и снова запустите `server/deploy.sh`. Сохраните `server/i2pd/data/outproxy.dat` — в нём ключи сервера.
+Скрипт соберёт и запустит контейнеры, получит адрес из локальной консоли i2pd и сохранит его в `server/OUTPROXY_ADDRESS.txt`. Не публикуйте адрес: отдельного пароля нет.
+
+Для обновления выполните `git pull --ff-only` и `sh server/deploy.sh`. Порт из `.env` сохранится. Сохраните `server/i2pd/data/outproxy.dat` — в нём ключи сервера. [Логи и переход со старого установщика](server/README.md).
 
 По умолчанию выход работает через IPv4. В Android оставьте DNS `1.1.1.1` или укажите другой публичный IPv4-DNS.
 
