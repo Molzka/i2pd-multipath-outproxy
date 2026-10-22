@@ -1,51 +1,55 @@
-# i2pd-multipath-outproxy
-Multipath socks5 outproxy for i2p network, for increase bandwidth, speed and stability
+# Multipath I2P
 
-Demo video: https://webm.red/view/9A6I.webm
+Android VPN и Linux SOCKS5 через несколько параллельных каналов I2P. Нужен свой выходной сервер.
 
-# Basic requirements
-- VPS (for outproxy)
-- Computer which you will use for anonymous access to the internet
+## Android
 
-# Minimal basic setup
-## VPS setup (execute it on your VPS)
-- `sudo apt install git docker docker-compose` Go to the your VPS and install requirements
-- `git clone https://github.com/f7124has/i2pd-multipath-outproxy.git` Clone the repo
-- `cd i2pd-multipath-outproxy/server/i2pd && ./scripts/build.sh && sudo chown -R 1000:1000 ./data && ./scripts/run.sh` Build docker image for i2pd and start it
-- `lynx 'http://127.0.0.1:7070/?page=i2p_tunnels'` Find your `.b32.i2p` address here. Save it, you will need it later to launch the client (looks like Encrypted B33 `tr26d3g4hviaqufmld6r16ikpdvjvd6g5qwdemnbuffck2fh663a.b32.i2p` and called `outproxy`)
-- `cd ../multipath && ./scripts/build.sh && ./scripts/run.sh` Build aggligator (multipath) docker image and haproxy and start it
-- `docker ps` Verify is all containers are started and work normaly
+Версия 1.2.0, встроенный i2pd 3.0.0. Android 8 и новее.
 
-## Your computer setup (client side)
-- `sudo apt install git docker docker-compose` Setup requirements
-- IMPORTANT! Make sure Docker is accessible from a regular system user without privileges. (non root)! Execute `docker ps` for verify it
-- `git clone https://github.com/f7124has/i2pd-multipath-outproxy.git` Clone the repo
-- `cd i2pd-multipath-outproxy/client/i2pd && ./scripts/build.sh` Build docker image
-- In file `gen.py` change `[CENSORED].b32.i2p` to the your server `.b32.i2p` address, it should looks like that: `tr26d3g4hviaqufmld6r16ikpdvjvd6g5qwdemnbuffck2fh663a.b32.i2p`
-- `python3 gen.py > data/tunnels.conf` Generate a i2pd tunnels config file using `gen.py` script
-- `sudo chown -R 1000:1000 ./data` Change `data` folder permissions (required for correct docker image working)
-- `./scripts/run.sh` Start the i2pd container
-- `cd ../multipath && ./scripts/build.sh && ./scripts/run.sh` Go back to multipath, build docker image and start the container
-- `docker ps` Verify is the all container are started and works.
-- Proxy `socks5` should be started on `0.0.0.0:1081` (haproxy) and `127.0.0.1:1080` (aggligator)
-- `curl --socks5-hostname 127.0.0.1:1080 1.1.1.1 -v` Try to use it!
+- [Скачать APK для ARM64](https://github.com/Molzka/i2pd-multipath-outproxy/releases/download/v1.2.0/multipath-i2p-1.2.0-arm64-v8a.apk)
+- [Скачать APK для x86_64](https://github.com/Molzka/i2pd-multipath-outproxy/releases/download/v1.2.0/multipath-i2p-1.2.0-x86_64.apk)
 
-## Bonus
-You can use this solution like a whonix. Both TCP/UDP supported.
-1. Create a virtual network interface between 2 VMs.
-2. Setup all software in [router-vm] and start it
-3. Put `client/multipath/sing-box-config.json` into [app-vm]
-4. Change socks5 proxy host here `client/multipath/sing-box-config.json`
-5. You can route all system network traffic throuth outproxy `./sing-box run -c client/multipath/sing-box-config.json`
+Вставьте адрес сервера и нажмите «Подключить». Первый запуск i2pd требует времени на вход в сеть.
 
-## How it works
-A typical outproxy is limited by the throughput of a single tunnel used for data transfer. As a user, you have no influence on the tunnel's throughput because it is built through other nodes in the network, which you have no control over. Consequently, your connection speed is almost always random and often slow.
+В настройках: DNS, MTU, исключения приложений, подключение при открытии и восстановление после сбоя. Каналы и прыжки выбираются на главном экране.
 
-Aggligator (https://github.com/surban/aggligator) allows you to split your single TCP connection into multiple ones, essentially allowing you to use multiple tunnels for a single outproxy. Their speeds will be combined. The default implementation in this repository uses 24 tunnels for data transfer, which can potentially increase download speeds several times over.
+Можно использовать установленный I2P-роутер через SAM. Адрес по умолчанию — `127.0.0.1:7656`; SAM должен быть включён в роутере.
 
-You can easily surf the internet and use popular apps like YouTube while remaining anonymous.
+Сам клиент и приложения-роутеры обходят VPN. Если включить в Android блокировку соединений без VPN, внешний роутер потеряет доступ к сети — используйте встроенный.
 
-# Thanks so much
-- https://github.com/PurpleI2P/i2pd
-- https://github.com/surban/aggligator
-- Also guys from http://irc.ilita.i2p/
+[Релиз 1.2.0](https://github.com/Molzka/i2pd-multipath-outproxy/releases/tag/v1.2.0) · [Сборка APK](android/README.md)
+
+## Сервер
+
+На VPS с Debian или Ubuntu:
+
+```sh
+git clone https://github.com/Molzka/i2pd-multipath-outproxy.git
+cd i2pd-multipath-outproxy
+sudo sh server/deploy.sh
+```
+
+Скрипт установит Docker, соберёт и запустит контейнеры. Адрес сервера появится в терминале и в `server/OUTPROXY_ADDRESS.txt`. Не публикуйте его: отдельного пароля нет.
+
+Для обновления выполните `git pull --ff-only` и снова запустите `server/deploy.sh`. Сохраните `server/i2pd/data/outproxy.dat` — в нём ключи сервера.
+
+По умолчанию выход работает через IPv4. В Android оставьте DNS `1.1.1.1` или укажите другой публичный IPv4-DNS.
+
+## Linux-клиент
+
+Нужны Docker Compose и Python 3. На другой машине, из корня репозитория:
+
+```sh
+python3 client/i2pd/gen.py "адрес.b32.i2p" > client/i2pd/data/tunnels.conf
+sudo chown -R 1000:1000 client/i2pd/data
+sudo sh client/i2pd/scripts/build.sh
+sudo sh client/i2pd/scripts/run.sh
+sudo sh client/multipath/scripts/build.sh
+sudo sh client/multipath/scripts/run.sh
+```
+
+SOCKS5: `127.0.0.1:1081`, TCP и UDP. По умолчанию используются 32 канала; при изменении `--links` в `gen.py` поменяйте и список `--tcp` в `client/multipath/docker-compose.yml`.
+
+Больше каналов расходует больше памяти и не всегда даёт больше скорости. Параметры агрегации находятся в `client/multipath/multipath.cfg` и `server/multipath/multipath.cfg`.
+
+Сторонние компоненты: [i2pd](https://github.com/PurpleI2P/i2pd), [aggligator](https://github.com/remoc-rs/aggligator), [tun2socks](https://github.com/xjasonlyu/tun2socks).
