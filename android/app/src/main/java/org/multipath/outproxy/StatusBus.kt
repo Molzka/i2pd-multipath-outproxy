@@ -13,7 +13,7 @@ data class Status(
     val phase: Phase = Phase.STOPPED,
     val links: Int = 16,
     val clientTunnels: Int = 0,
-    val expectedTunnels: Int = 64,
+    val expectedTunnels: Int = 80,
     val routers: Int = 0,
     val successRate: Int = -1,
     val rttMs: Long = 0,
@@ -43,12 +43,13 @@ object StatusBus {
         val next = f(status)
         if (next == status) return
         status = next
-        main.post { listeners.forEach { it(next) } }
+        main.post { if (status === next) listeners.forEach { it(next) } }
     }
 
     fun listen(l: (Status) -> Unit) {
-        listeners += l
-        l(status)
+        listeners.addIfAbsent(l)
+        if (Looper.myLooper() == Looper.getMainLooper()) l(status)
+        else main.post { if (l in listeners) l(status) }
     }
 
     fun unlisten(l: (Status) -> Unit) {
@@ -81,4 +82,17 @@ object StatusBus {
     }
 
     fun logText(): String = synchronized(logLines) { logLines.joinToString("\n") }
+
+    fun clearLog() {
+        synchronized(logLines) {
+            logLines.clear()
+            lastKey = ""
+            repeats = 0
+        }
+    }
+
+    fun sanitizedLogText(): String = logText()
+        .replace(Regex("(?i)[a-z2-7]{40,}(?:\\.b32\\.i2p)?"), "[I2P address]")
+        .replace(Regex("(?i)(authorization\\s*[:=]\\s*)[^\\r\\n]+"), "$1[redacted]")
+        .replace(Regex("(?i)((?:pass(?:word)?|secret|token|privatekey)\\s*[:=]\\s*)[^\\s,;]+"), "$1[redacted]")
 }

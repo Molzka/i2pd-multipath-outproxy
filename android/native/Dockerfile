@@ -3,7 +3,7 @@ ARG NDK_VERSION=r27c
 ARG API=24
 ARG ABI=arm64-v8a
 
-FROM ubuntu:24.04 AS ndk
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS ndk
 ARG NDK_VERSION
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build git curl ca-certificates unzip perl python3 bzip2 patch file \
@@ -58,11 +58,14 @@ RUN . abi-env && mkdir -p /src && cd /src \
 FROM ndk AS i2pd
 ARG API
 ARG ABI
-ARG I2PD_VERSION=2.61.0
+ARG I2PD_VERSION=3.0.0
+ARG I2PD_COMMIT=137dde2f433b2142eec7a2307608d7d082be086f
+ARG BUILD_JOBS=1
 COPY --from=openssl /deps/openssl /deps/openssl
 COPY --from=boost /deps/boost /deps/boost
 COPY i2pd/my.patch /tmp/my.patch
 RUN git clone --depth 1 --branch ${I2PD_VERSION} https://github.com/PurpleI2P/i2pd.git /src/i2pd \
+    && test "$(git -C /src/i2pd rev-parse HEAD)" = "$I2PD_COMMIT" \
     && sed -i 's/\r$//' /tmp/my.patch \
     && cd /src/i2pd && git apply /tmp/my.patch \
     && git checkout -- libi2pd/NetDb.hpp libi2pd/NetDbRequests.cpp
@@ -83,11 +86,22 @@ RUN . abi-env && cmake -S /src/i2pd/build -B /build -G Ninja \
       -DOPENSSL_INCLUDE_DIR=/deps/openssl/include \
       -DOPENSSL_CRYPTO_LIBRARY=/deps/openssl/lib/libcrypto.a \
       -DOPENSSL_SSL_LIBRARY=/deps/openssl/lib/libssl.a \
-    && cmake --build /build -j"$JOBS" --target i2pd \
+    && cmake --build /build -j"$BUILD_JOBS" --target i2pd \
     && llvm-strip --strip-unneeded /build/i2pd \
     && llvm-readelf -d /build/i2pd | grep NEEDED \
     && mkdir -p /out && cp /build/i2pd /out/libi2pd.so \
-    && cp -r /src/i2pd/contrib/certificates /out/certificates
+    && printf 'version=%s\ncommit=%s\nabi=%s\npatch=%s\nbinary=%s\n' \
+         "$I2PD_VERSION" "$I2PD_COMMIT" "$ABI" \
+         "$(sha256sum /tmp/my.patch | cut -d ' ' -f 1)" \
+         "$(sha256sum /out/libi2pd.so | cut -d ' ' -f 1)" > /out/i2pd-build.properties \
+    && cp -r /src/i2pd/contrib/certificates /out/certificates \
+    && rm -rf /build /src/i2pd
+
+FROM scratch AS i2pd-export
+ARG ABI
+COPY --from=i2pd /out/libi2pd.so /${ABI}/libi2pd.so
+COPY --from=i2pd /out/i2pd-build.properties /${ABI}/i2pd-build.properties
+COPY --from=i2pd /out/certificates /certificates
 
 FROM ndk AS aggtunnel
 ARG API
@@ -139,6 +153,7 @@ RUN . abi-env && CGO_ENABLED=1 GOOS=android GOARCH=$GOARCH \
 FROM scratch
 ARG ABI
 COPY --from=i2pd /out/libi2pd.so /${ABI}/libi2pd.so
+COPY --from=i2pd /out/i2pd-build.properties /${ABI}/i2pd-build.properties
 COPY --from=aggtunnel /out/libaggtunnel.so /${ABI}/libaggtunnel.so
 COPY --from=i2pmux /out/libi2pmux.so /${ABI}/libi2pmux.so
 COPY --from=i2pd /out/certificates /certificates

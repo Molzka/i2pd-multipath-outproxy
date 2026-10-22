@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settings_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+    <ScrollView
+        android:id="@+id/settings_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:scrollbarStyle="outsideOverlay">
+        <LinearLayout
+            android:id="@+id/settings_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/gutter"
+            android:paddingEnd="@dimen/gutter"
+            android:paddingTop="@dimen/s5"
+            android:paddingBottom="@dimen/s5">
+            <Button
+                android:id="@+id/settings_back"
+                style="@style/Button.Quiet"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_back" />
+            <TextView
+                style="@style/Text.Display"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s5"
+                android:text="@string/settings_title" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_intro" />
+            <TextView
+                android:id="@+id/settings_busy"
+                style="@style/SettingsHelp"
+                android:layout_marginTop="@dimen/s4"
+                android:accessibilityLiveRegion="polite"
+                android:text="@string/settings_locked_note"
+                android:textColor="@color/accent"
+                android:visibility="gone" />
+
+            <TextView style="@style/SettingsGroupTitle" android:text="@string/settings_connection" />
+            <Switch android:id="@+id/settings_connect_on_open" style="@style/SettingsSwitch" android:text="@string/settings_connect_on_open" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_connect_on_open_help" />
+            <Switch
+                android:id="@+id/settings_recover"
+                style="@style/SettingsSwitch"
+                android:layout_marginTop="@dimen/s4"
+                android:text="@string/settings_recover" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_recover_help" />
+
+            <View style="@style/Rule" android:layout_marginTop="@dimen/s6" />
+            <TextView style="@style/SettingsGroupTitle" android:layout_marginTop="@dimen/s5" android:text="@string/settings_routing" />
+            <Button android:id="@+id/settings_apps" style="@style/SettingsAction" android:layout_marginTop="0dp" android:text="@string/settings_apps" />
+            <TextView android:id="@+id/settings_apps_summary" style="@style/SettingsHelp" android:text="@string/settings_apps_none" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_apps_help" />
+
+            <TextView style="@style/SettingsGroupTitle" android:text="@string/settings_network" />
+            <TextView style="@style/SettingsLabel" android:layout_marginTop="0dp" android:labelFor="@id/settings_dns" android:text="@string/settings_dns" />
+            <EditText android:id="@+id/settings_dns" style="@style/SettingsField" android:importantForAutofill="no" android:imeOptions="actionNext|flagNoExtractUi" android:maxLength="45" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_dns_help" />
+            <TextView style="@style/SettingsLabel" android:labelFor="@id/settings_mtu" android:text="@string/settings_mtu" />
+            <RadioGroup
+                android:id="@+id/settings_mtu"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s2"
+                android:orientation="horizontal">
+                <RadioButton android:id="@+id/settings_mtu_1280" style="@style/SegmentCell" android:text="@string/settings_mtu_1280" />
+                <RadioButton android:id="@+id/settings_mtu_1400" style="@style/SegmentCell" android:text="@string/settings_mtu_1400" />
+                <RadioButton android:id="@+id/settings_mtu_1500" style="@style/SegmentCell.Last" android:text="@string/settings_mtu_1500" />
+            </RadioGroup>
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_mtu_help" />
+            <Switch
+                android:id="@+id/settings_metered"
+                style="@style/SettingsSwitch"
+                android:layout_marginTop="@dimen/s5"
+                android:text="@string/settings_metered" />
+            <TextView android:id="@+id/settings_metered_help" style="@style/SettingsHelp" android:text="@string/settings_metered_help" />
+            <TextView style="@style/SettingsLabel" android:labelFor="@id/settings_sam" android:text="@string/settings_sam" />
+            <EditText android:id="@+id/settings_sam" style="@style/SettingsField" android:importantForAutofill="no" android:imeOptions="actionDone|flagNoExtractUi" android:maxLength="261" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_sam_help" />
+
+            <View style="@style/Rule" android:layout_marginTop="@dimen/s6" />
+            <TextView style="@style/SettingsGroupTitle" android:layout_marginTop="@dimen/s5" android:text="@string/settings_system" />
+            <TextView style="@style/SettingsHelp" android:layout_marginTop="0dp" android:text="@string/settings_vpn_help" />
+            <Button android:id="@+id/settings_system_vpn" style="@style/SettingsAction" android:text="@string/settings_open_vpn" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_lockdown_help" />
+
+            <TextView style="@style/SettingsGroupTitle" android:text="@string/settings_diagnostics" />
+            <TextView android:id="@+id/settings_version" style="@style/SettingsHelp" android:layout_marginTop="0dp" android:textIsSelectable="true" />
+            <Button android:id="@+id/settings_copy_log" style="@style/SettingsAction" android:text="@string/settings_copy_log" />
+            <TextView style="@style/SettingsHelp" android:text="@string/settings_copy_help" />
+            <Button android:id="@+id/settings_clear_log" style="@style/SettingsAction" android:text="@string/settings_clear_log" />
+            <Button android:id="@+id/settings_reset" style="@style/SettingsAction" android:text="@string/settings_reset" />
+
+        </LinearLayout>
+    </ScrollView>
+    <LinearLayout
+        android:id="@+id/settings_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/bg"
+        android:paddingStart="@dimen/gutter"
+        android:paddingEnd="@dimen/gutter"
+        android:paddingBottom="@dimen/s3">
+        <View style="@style/Rule" />
+        <Button
+            android:id="@+id/settings_save"
+            style="@style/Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:text="@string/settings_save" />
+    </LinearLayout>
+</LinearLayout>

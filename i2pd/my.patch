@@ -1,5 +1,5 @@
 diff --git a/libi2pd/NetDb.hpp b/libi2pd/NetDb.hpp
-index 358e003..66283a4 100644
+index 4c6b157..e3d8b70 100644
 --- a/libi2pd/NetDb.hpp
 +++ b/libi2pd/NetDb.hpp
 @@ -39,14 +39,14 @@ namespace i2p
@@ -21,10 +21,10 @@ index 358e003..66283a4 100644
  	const int NETDB_MAX_EXPIRATION_TIMEOUT = 27 * 60 * 60; // 27 hours
  	const int NETDB_MAX_OFFLINE_EXPIRATION_TIMEOUT = 180; // in days
 diff --git a/libi2pd/NetDbRequests.cpp b/libi2pd/NetDbRequests.cpp
-index 88ee6f7..5b4968d 100644
+index 8e42160..a6aa7ba 100644
 --- a/libi2pd/NetDbRequests.cpp
 +++ b/libi2pd/NetDbRequests.cpp
-@@ -518,7 +518,7 @@ namespace data
+@@ -531,6 +531,6 @@ namespace data
  		if (ecode != boost::asio::error::operation_aborted)
  		{
  			auto numRouters = netdb.GetNumRouters ();
@@ -32,12 +32,11 @@ index 88ee6f7..5b4968d 100644
 +			auto nextExploratoryInterval = numRouters < 25000 ? (EXPLORATORY_REQUEST_INTERVAL + m_Rng () % EXPLORATORY_REQUEST_INTERVAL)/2 :
  				EXPLORATORY_REQUEST_INTERVAL + m_Rng () % EXPLORATORY_REQUEST_INTERVAL_VARIANCE;
  			if (numRouters)
- 			{	
 diff --git a/libi2pd/RouterInfo.h b/libi2pd/RouterInfo.h
-index be9cbcc..9968f0b 100644
+index c67c0d3..15347a8 100644
 --- a/libi2pd/RouterInfo.h
 +++ b/libi2pd/RouterInfo.h
-@@ -190,8 +190,8 @@ namespace data
+@@ -191,8 +191,8 @@ namespace data
  				bool IsSameSubnet (const Address& other)
  				{
  					if (host.is_unspecified () || other.host.is_unspecified ()) return false;
@@ -49,7 +48,7 @@ index be9cbcc..9968f0b 100644
  				}
  			};
 diff --git a/libi2pd/Streaming.h b/libi2pd/Streaming.h
-index b2659b2..31e2262 100644
+index 24b68a1..014629f 100644
 --- a/libi2pd/Streaming.h
 +++ b/libi2pd/Streaming.h
 @@ -56,7 +56,7 @@ namespace stream
@@ -62,10 +61,10 @@ index b2659b2..31e2262 100644
  	const int MAX_WINDOW_SIZE = 512;
  	const int MAX_WINDOW_SIZE_INC_PER_RTT = 512; // TODO: remove
 diff --git a/libi2pd/TunnelPool.cpp b/libi2pd/TunnelPool.cpp
-index 3fd50b8..0be09e2 100644
+index dbdace6..c9590a0 100644
 --- a/libi2pd/TunnelPool.cpp
 +++ b/libi2pd/TunnelPool.cpp
-@@ -850,8 +850,8 @@ namespace tunnel
+@@ -853,8 +853,8 @@ namespace tunnel
  				if (newTunnel)
  				{
  					newTunnel->SetTunnelPool (shared_from_this ());

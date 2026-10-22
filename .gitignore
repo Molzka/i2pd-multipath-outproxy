@@ -8,6 +8,7 @@ server/OUTPROXY_ADDRESS.txt
 *_image.tar
 
 android/.gradle/
+android/.kotlin/
 android/build/
 android/app/build/
 android/local.properties
@@ -18,6 +19,9 @@ android/app/src/main/jniLibs/
 android/app/src/main/assets/certificates/
 android/app/src/main/assets/multipath.cfg
 dist/
+.tmp/
+android/hs_err_pid*.log
+android/replay_pid*.log
 
 
 i2pmux/i2pmux

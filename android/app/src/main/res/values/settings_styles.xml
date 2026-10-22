@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="SettingsGroupTitle" parent="Text.Section">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/s6</item>
+        <item name="android:layout_marginBottom">@dimen/s3</item>
+    </style>
+    <style name="SettingsHelp" parent="Text.Help">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/s2</item>
+    </style>
+    <style name="SettingsLabel" parent="Text.Body">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/s5</item>
+    </style>
+    <style name="SettingsSwitch" parent="android:Widget.Material.CompoundButton.Switch">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">@dimen/touch</item>
+        <item name="android:fontFamily">@font/plex_sans_regular</item>
+        <item name="android:textSize">@dimen/t_body</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:switchPadding">@dimen/s4</item>
+        <item name="android:background">?android:attr/selectableItemBackground</item>
+    </style>
+    <style name="SettingsField" parent="android:Widget.Material.EditText">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/s2</item>
+        <item name="android:minHeight">@dimen/touch</item>
+        <item name="android:background">@drawable/field</item>
+        <item name="android:fontFamily">@font/plex_mono_regular</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">@dimen/t_small</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:inputType">textNoSuggestions|textVisiblePassword</item>
+        <item name="android:importantForAutofill">no</item>
+    </style>
+    <style name="SettingsAction" parent="Button.Quiet">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/s3</item>
+    </style>
+</resources>

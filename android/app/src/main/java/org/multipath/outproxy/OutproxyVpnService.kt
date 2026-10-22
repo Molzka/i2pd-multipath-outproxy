@@ -9,11 +9,26 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
-import java.util.concurrent.Executors
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.atomic.AtomicInteger
 
 class OutproxyVpnService : VpnService() {
-    private val worker = Executors.newSingleThreadExecutor()
-    private var engine: Engine? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val worker = ScheduledThreadPoolExecutor(1) { task -> Thread(task, "vpn-engine") }.apply {
+        setRemoveOnCancelPolicy(true)
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+        setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
+    }
+    private val requests = AtomicInteger()
+    @Volatile private var engine: Engine? = null
+    @Volatile private var destroyed = false
+    @Volatile private var latestStartId = 0
+    private var engineRequest = 0
+    private var engineStartId = 0
     private val listener: (Status) -> Unit = { updateNotification(it) }
 
     override fun onCreate() {
@@ -24,52 +39,92 @@ class OutproxyVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
+        val request = requests.incrementAndGet()
         if (intent?.action == ACTION_STOP) {
-            worker.execute {
-                engine?.stop()
-                engine = null
-                StatusBus.unlisten(listener)
-                stopForegroundCompat()
-                stopSelf()
-            }
+            stopConnection(request, startId)
             return START_NOT_STICKY
         }
+        val connectionSettings = Settings(this).snapshot()
         goForeground(StatusBus.status)
         worker.execute {
-            if (engine != null) return@execute
-            if (!Settings.isValidAddress(Settings(this).serverAddress)) {
-                StatusBus.update { it.copy(phase = Phase.ERROR, error = getString(R.string.err_no_address)) }
-                stopForegroundCompat()
-                stopSelf()
+            if (destroyed || request != requests.get()) return@execute
+            if (engine?.isRunning == true) {
+                engineRequest = request
+                engineStartId = startId
                 return@execute
             }
-            StatusBus.listen(listener)
-            engine = Engine(this) {
-                worker.execute {
-                    engine = null
-                    StatusBus.unlisten(listener)
-                    stopForegroundCompat()
-                    stopSelf()
+            engine?.stop()
+            engine = null
+            try {
+                if (!Settings.isValidAddress(connectionSettings.serverAddress)) {
+                    throw IllegalStateException(getString(R.string.err_no_address))
                 }
-            }.also { it.start() }
+                if (prepare(this) != null) throw IllegalStateException(getString(R.string.err_permission))
+                StatusBus.listen(listener)
+                engineRequest = request
+                engineStartId = startId
+                lateinit var next: Engine
+                next = Engine(this, worker, connectionSettings) {
+                    if (engine === next) {
+                        engine = null
+                        finishRequest(engineRequest, engineStartId)
+                    }
+                }
+                engine = next
+                if (destroyed || request != requests.get()) next.requestStop()
+                next.start()
+            } catch (e: Exception) {
+                engine?.stop()
+                engine = null
+                StatusBus.log("app", "VPN start failed: $e")
+                StatusBus.update { it.copy(phase = Phase.ERROR, error = e.message ?: e.toString()) }
+                finishRequest(request, startId)
+            }
         }
-        return START_STICKY
+        return if (connectionSettings.autoReconnect) START_STICKY else START_NOT_STICKY
+    }
+
+    private fun stopConnection(request: Int, startId: Int) {
+        engine?.requestStop()
+        try {
+            worker.execute {
+                if (destroyed || request != requests.get()) return@execute
+                engine?.stop()
+                engine = null
+                StatusBus.update { Status(links = it.links, expectedTunnels = it.expectedTunnels, external = it.external) }
+                finishRequest(request, startId)
+            }
+        } catch (_: RejectedExecutionException) {}
+    }
+
+    private fun finishRequest(request: Int, startId: Int) {
+        main.post {
+            if (!destroyed && request == requests.get()) {
+                StatusBus.unlisten(listener)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelfResult(startId)
+            }
+        }
     }
 
     override fun onRevoke() {
-        worker.execute {
-            engine?.stop()
-            engine = null
-            stopForegroundCompat()
-            stopSelf()
-        }
+        if (!destroyed) stopConnection(requests.incrementAndGet(), latestStartId)
     }
 
     override fun onDestroy() {
+        destroyed = true
+        requests.incrementAndGet()
         StatusBus.unlisten(listener)
-        engine?.stop()
-        engine = null
-        worker.shutdown()
+        engine?.requestStop()
+        worker.execute {
+            try {
+                engine?.stop()
+            } finally {
+                engine = null
+                worker.shutdown()
+            }
+        }
         super.onDestroy()
     }
 
@@ -82,15 +137,19 @@ class OutproxyVpnService : VpnService() {
         }
     }
 
-    private fun stopForegroundCompat() = stopForeground(STOP_FOREGROUND_REMOVE)
-
-    private var lastText: String? = null
+    private var lastTitle: String? = null
+    private var lastDetail: String? = null
+    private var lastNotificationAt = 0L
 
     private fun updateNotification(s: Status) {
-        if (s.phase == Phase.STOPPED || s.phase == Phase.ERROR) return
-        val text = Texts.headline(this, s)
-        if (text == lastText) return
-        lastText = text
+        if (destroyed || s.phase == Phase.STOPPED || s.phase == Phase.ERROR) return
+        val title = Texts.headline(this, s)
+        val detail = Texts.detail(this, s)
+        val now = SystemClock.elapsedRealtime()
+        if (title == lastTitle && (detail == lastDetail || now - lastNotificationAt < 10_000)) return
+        lastTitle = title
+        lastDetail = detail
+        lastNotificationAt = now
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(s))
     }
 

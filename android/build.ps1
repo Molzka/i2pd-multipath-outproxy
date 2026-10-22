@@ -1,9 +1,16 @@
-param([switch]$SkipNative, [string[]]$Abis = @("arm64-v8a", "x86_64"))
+param([switch]$SkipNative, [ValidateSet('arm64-v8a', 'x86_64')][string[]]$Abis = @("arm64-v8a", "x86_64"))
 $ErrorActionPreference = "Stop"
 $android = $PSScriptRoot
 $root = Split-Path $android -Parent
 $assets = Join-Path $android "app\src\main\assets"
 $out = Join-Path $android "native\out"
+$nativeRecipe = Get-Content -Raw -LiteralPath "$android\native\Dockerfile"
+$i2pdVersion = [regex]::Match($nativeRecipe, '(?m)^ARG I2PD_VERSION=(.+)$').Groups[1].Value.Trim()
+$i2pdCommit = [regex]::Match($nativeRecipe, '(?m)^ARG I2PD_COMMIT=(.+)$').Groups[1].Value.Trim()
+$patchBytes = [Text.Encoding]::UTF8.GetBytes([IO.File]::ReadAllText("$root\i2pd\my.patch").Replace("`r`n", "`n"))
+$sha256 = [Security.Cryptography.SHA256]::Create()
+try { $patchHash = [BitConverter]::ToString($sha256.ComputeHash($patchBytes)).Replace('-', '').ToLowerInvariant() }
+finally { $sha256.Dispose() }
 New-Item -ItemType Directory -Force $assets | Out-Null
 
 foreach ($abi in $Abis) {
@@ -12,9 +19,20 @@ foreach ($abi in $Abis) {
         docker build -f "$android\native\Dockerfile" --build-arg "ABI=$abi" --output "type=local,dest=$out" $root
         if ($LASTEXITCODE) { throw "native build failed ($abi)" }
     }
+    $manifest = "$out\$abi\i2pd-build.properties"
+    if (-not (Test-Path -LiteralPath $manifest)) { throw "Missing i2pd build manifest for $abi. Rebuild without -SkipNative." }
+    $native = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-StringData
+    $binaryHash = (Get-FileHash -LiteralPath "$out\$abi\libi2pd.so" -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($native.version -ne $i2pdVersion -or $native.commit -ne $i2pdCommit -or $native.abi -ne $abi -or $native.patch -ne $patchHash -or $native.binary -ne $binaryHash) {
+        throw "Stale or modified i2pd binary for $abi. Rebuild without -SkipNative."
+    }
+    foreach ($library in @('libi2pd.so', 'libaggtunnel.so', 'libi2pmux.so')) {
+        if (-not (Test-Path -LiteralPath "$out\$abi\$library")) { throw "Missing $library for $abi. Rebuild without -SkipNative." }
+    }
     $jni = Join-Path $android "app\src\main\jniLibs\$abi"
     New-Item -ItemType Directory -Force $jni | Out-Null
     Copy-Item "$out\$abi\*.so" $jni -Force
+    Copy-Item -LiteralPath $manifest -Destination "$jni\i2pd-build.properties" -Force
 }
 if (Test-Path "$assets\certificates") { Remove-Item -Recurse -Force "$assets\certificates" }
 Copy-Item -Recurse "$out\certificates" "$assets\certificates"
@@ -41,7 +59,7 @@ if (-not (Test-Path $local)) {
 Write-Host "==> gradle assembleRelease"
 Push-Location $android
 try {
-    & .\gradlew.bat --no-daemon assembleRelease
+    & .\gradlew.bat --no-daemon "-PnativeAbis=$($Abis -join ',')" assembleRelease
     if ($LASTEXITCODE) { throw "gradle failed" }
 } finally { Pop-Location }
 

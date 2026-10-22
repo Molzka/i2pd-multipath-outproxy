@@ -40,8 +40,7 @@ object I2pdConf {
         Regex("^\\s*\\[(http|ntcp2|ssu2|sam|reseed|httpproxy)\\]", RegexOption.MULTILINE).containsMatchIn(conf)
 
     fun probeSam(address: String): String? {
-        val host = address.substringBeforeLast(':')
-        val port = address.substringAfterLast(':').toIntOrNull() ?: return null
+        val (host, port) = Settings.parseSamAddress(address) ?: return null
         return try {
             Socket().use { s ->
                 s.connect(InetSocketAddress(host, port), 700)

@@ -4,7 +4,9 @@ import android.content.pm.PackageManager
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.net.VpnService
+import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import android.util.Base64
@@ -12,9 +14,17 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
-class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
-    private val settings = Settings(svc)
+internal class Engine(
+    private val svc: VpnService,
+    private val worker: ScheduledExecutorService,
+    private val settings: ConnectionSettings,
+    private val onFatal: () -> Unit,
+) {
     private val binDir = File(svc.applicationInfo.nativeLibraryDir)
     private val dataDir = File(svc.filesDir, "i2pd")
     private val sockPath = File(svc.filesDir, "tun.sock").absolutePath
@@ -22,11 +32,21 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
     private var tun: ParcelFileDescriptor? = null
     private val procs = mutableMapOf<String, Process>()
     private val restarts = mutableMapOf<String, Int>()
+    private val startedAt = mutableMapOf<String, Long>()
+    private val retryAfter = mutableMapOf<String, Long>()
 
     @Volatile
     private var running = false
+    @Volatile
+    private var cancelled = false
+    @Volatile
+    private var handoffSocket: LocalSocket? = null
+    @Volatile
+    private var monitor: ScheduledFuture<*>? = null
     private var pollErrorLogged = false
-    private var monitor: Thread? = null
+    private var nextPollAt = 0L
+
+    val isRunning: Boolean get() = running && !cancelled
 
     private val links = settings.links
     private val external = settings.externalRouter
@@ -34,40 +54,67 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
     private val processNames = if (external) listOf(SAM, AGG, MUX) else listOf(I2PD, AGG, MUX)
 
     fun start() {
+        if (cancelled) return
         running = true
         StatusBus.update {
             Status(phase = Phase.STARTING, links = links, expectedTunnels = expectedTunnels,
                 startedAt = System.currentTimeMillis(), external = external)
         }
         try {
+            require(Settings.isValidAddress(settings.serverAddress)) { svc.getString(R.string.err_no_address) }
             killStale()
             prepareFiles()
+            if (!running) return
             tun = establish()
             startAll()
+            if (!running) return
+            monitor = worker.scheduleWithFixedDelay({
+                if (running) {
+                    try {
+                        checkProcesses()
+                        val now = SystemClock.elapsedRealtime()
+                        if (running && !external && now >= nextPollAt) {
+                            pollI2pd()
+                            nextPollAt = now + if (StatusBus.status.phase == Phase.READY) 10_000 else 2000
+                        }
+                    } catch (e: Exception) {
+                        if (running) fail(e.message ?: e.toString())
+                    }
+                }
+            }, 2, 2, TimeUnit.SECONDS)
         } catch (e: Exception) {
+            if (cancelled) return
             StatusBus.log("app", "start failed: $e")
             fail(e.message ?: e.toString())
-            return
         }
-        monitor = Thread(::monitorLoop, "monitor").also { it.start() }
+    }
+
+    fun requestStop() {
+        cancelled = true
+        running = false
+        monitor?.cancel(false)
+        try { handoffSocket?.close() } catch (_: Exception) {}
     }
 
     fun stop() {
-        if (!running && procs.isEmpty() && tun == null) return
-        running = false
+        val hadResources = running || synchronized(procs) { procs.isNotEmpty() } || tun != null
+        requestStop()
+        if (!hadResources) return
         StatusBus.update { it.copy(phase = Phase.STOPPING) }
-        monitor?.interrupt()
-        synchronized(procs) {
-            for (name in processNames.reversed()) procs.remove(name)?.let { stopProcess(it) }
+        val processes = synchronized(procs) {
+            processNames.reversed().mapNotNull { procs.remove(it) }
         }
+        for (p in processes) try { p.destroy() } catch (_: Exception) {}
         try { tun?.close() } catch (_: Exception) {}
         tun = null
+        for (p in processes) stopProcess(p)
         StatusBus.update {
             Status(phase = Phase.STOPPED, links = links, expectedTunnels = expectedTunnels, external = external)
         }
     }
 
     private fun fail(msg: String) {
+        if (cancelled) return
         stop()
         StatusBus.update { it.copy(phase = Phase.ERROR, error = msg) }
         onFatal()
@@ -178,18 +225,19 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
     private fun establish(): ParcelFileDescriptor {
         val b = svc.Builder()
             .setSession(svc.getString(R.string.app_name))
-            .setMtu(MTU)
+            .setMtu(settings.mtu)
             .addAddress("10.77.0.2", 30)
             .addRoute("0.0.0.0", 0)
             .addAddress("fd77:77::2", 126)
             .addRoute("::", 0)
-            .addDnsServer(DNS)
+            .addDnsServer(settings.dnsServer)
+        if (Build.VERSION.SDK_INT >= 29) b.setMetered(settings.metered)
         try {
             b.addDisallowedApplication(svc.packageName)
         } catch (e: PackageManager.NameNotFoundException) {
             throw IllegalStateException(e)
         }
-        for (pkg in Settings.ROUTER_PACKAGES) {
+        for (pkg in (Settings.ROUTER_PACKAGES + settings.excludedApps).distinct().filter { it != svc.packageName }) {
             try {
                 b.addDisallowedApplication(pkg)
             } catch (_: PackageManager.NameNotFoundException) {
@@ -200,7 +248,12 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
     }
 
 
-    private fun startAll() = processNames.forEach(::startProcess)
+    private fun startAll() {
+        for (name in processNames) {
+            if (!running) return
+            startProcess(name)
+        }
+    }
 
     private fun command(name: String): List<String> = when (name) {
         I2PD -> listOf(
@@ -235,7 +288,7 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
             bin("libi2pmux.so"), "vpn",
             "-fd-sock", sockPath,
             "-upstream", "127.0.0.1:${settings.muxPort}",
-            "-mtu", MTU.toString(),
+            "-mtu", settings.mtu.toString(),
         )
         else -> error(name)
     }
@@ -243,22 +296,35 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
     private fun bin(name: String) = File(binDir, name).absolutePath
 
     private fun startProcess(name: String) {
+        if (!running) return
         val p = ProcessBuilder(command(name))
             .directory(dataDir)
             .redirectErrorStream(true)
             .start()
         synchronized(procs) { procs[name] = p }
+        startedAt[name] = SystemClock.elapsedRealtime()
         Thread({ readOutput(name, p) }, "out-$name").start()
-        if (name == MUX) sendTunFd()
+        try {
+            if (name == MUX) sendTunFd()
+        } catch (e: Exception) {
+            p.destroyForcibly()
+            throw e
+        }
     }
 
     private fun readOutput(name: String, p: Process) {
         try {
             p.inputStream.bufferedReader().forEachLine { line ->
-                when {
-                    name == MUX && line.startsWith("{") -> onMuxStatus(line)
-                    name == SAM && line.startsWith("{") -> onSamStatus(line)
-                    else -> StatusBus.log(name, line)
+                if (line.startsWith("{") && (name == MUX || name == SAM)) {
+                    try {
+                        worker.execute {
+                            if (running && synchronized(procs) { procs[name] === p } && p.isAliveCompat()) {
+                                if (name == MUX) onMuxStatus(line) else onSamStatus(line)
+                            }
+                        }
+                    } catch (_: RejectedExecutionException) {}
+                } else {
+                    StatusBus.log(name, line)
                 }
             }
         } catch (_: Exception) {
@@ -267,30 +333,38 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
 
     private fun sendTunFd() {
         val fd = tun?.fileDescriptor ?: return
-        val deadline = System.currentTimeMillis() + 20_000
+        val deadline = SystemClock.elapsedRealtime() + 20_000
         while (running) {
             try {
                 LocalSocket().use { s ->
+                    handoffSocket = s
+                    if (!running) return
                     s.connect(LocalSocketAddress(sockPath, LocalSocketAddress.Namespace.FILESYSTEM))
+                    s.soTimeout = 1000
                     s.setFileDescriptorsForSend(arrayOf(fd))
                     s.outputStream.write(1)
-                    s.inputStream.read()
+                    check(s.inputStream.read() == 1) { "TUN handoff was not acknowledged" }
                 }
                 return
             } catch (e: Exception) {
-                if (System.currentTimeMillis() > deadline) throw IllegalStateException("i2pmux: $e")
+                if (!running) return
+                if (SystemClock.elapsedRealtime() > deadline) throw IllegalStateException("i2pmux: $e")
                 Thread.sleep(100)
+            } finally {
+                handoffSocket = null
             }
         }
     }
 
     private fun stopProcess(p: Process) {
-        p.destroy()
-        for (i in 0 until 50) {
-            if (!p.isAliveCompat()) return
-            Thread.sleep(100)
+        try {
+            if (!p.waitFor(1500, TimeUnit.MILLISECONDS)) p.destroyForcibly()
+        } catch (_: InterruptedException) {
+            p.destroyForcibly()
+            Thread.currentThread().interrupt()
+        } catch (_: Exception) {
+            p.destroyForcibly()
         }
-        p.destroyForcibly()
     }
 
     private fun killStale() {
@@ -308,36 +382,64 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
     }
 
 
-    private fun monitorLoop() {
-        while (running) {
-            try {
-                Thread.sleep(if (StatusBus.status.phase == Phase.READY) 10_000 else 2000)
-            } catch (_: InterruptedException) {
-                return
+    private fun checkProcesses() {
+        val now = SystemClock.elapsedRealtime()
+        for (name in processNames) {
+            if (!running) return
+            val p = synchronized(procs) { procs[name] }
+            if (p?.isAliveCompat() == true) {
+                if (now - (startedAt[name] ?: now) >= 60_000) restarts.remove(name)
+                continue
             }
-            checkProcesses()
-            if (!external) pollI2pd()
+            if (!retryAfter.containsKey(name)) {
+                if (p != null) {
+                    StatusBus.log("app", "$name exited (${p.exitValue()})")
+                    synchronized(procs) { procs.remove(name) }
+                    markUnavailable(name)
+                }
+                if (!scheduleRetry(name, now)) return
+            }
+            if (now < (retryAfter[name] ?: now)) continue
+            retryAfter.remove(name)
+            try {
+                startProcess(name)
+            } catch (e: Exception) {
+                if (!running) return
+                StatusBus.log("app", "restart $name failed: $e")
+                synchronized(procs) { procs.remove(name) }?.let {
+                    it.destroyForcibly()
+                    stopProcess(it)
+                }
+                if (!scheduleRetry(name, SystemClock.elapsedRealtime())) return
+            }
         }
     }
 
-    private fun checkProcesses() {
-        for (name in processNames) {
-            val p = synchronized(procs) { procs[name] } ?: continue
-            if (p.isAliveCompat() || !running) continue
-            val n = (restarts[name] ?: 0) + 1
-            restarts[name] = n
-            StatusBus.log("app", "$name exited (${p.exitValue()}), restart #$n")
-            if (n > 20) {
-                fail(svc.getString(R.string.err_crashing, name))
-                return
-            }
-            try {
-                Thread.sleep(minOf(1000L * n, 10_000L))
-                if (running) startProcess(name)
-            } catch (e: Exception) {
-                StatusBus.log("app", "restart $name failed: $e")
-            }
+    private fun markUnavailable(name: String) {
+        StatusBus.update { s ->
+            val next = s.copy(
+                readySince = 0,
+                streams = 0,
+                rttMs = 0,
+                clientTunnels = if (name == I2PD || name == SAM) 0 else s.clientTunnels,
+                routers = if (name == I2PD) 0 else s.routers,
+                samReachable = if (name == SAM) false else s.samReachable,
+            )
+            next.copy(phase = phaseOf(next))
         }
+    }
+
+    private fun scheduleRetry(name: String, now: Long): Boolean {
+        if (!running) return false
+        val attempts = (restarts[name] ?: 0) + 1
+        restarts[name] = attempts
+        if (!settings.autoReconnect || attempts > 20) {
+            fail(svc.getString(if (settings.autoReconnect) R.string.err_crashing else R.string.err_process_stopped, name))
+            return false
+        }
+        retryAfter[name] = now + minOf(1000L * attempts, 10_000L)
+        StatusBus.log("app", "$name restart #$attempts scheduled")
+        return true
     }
 
     private fun pollI2pd() {
@@ -347,7 +449,7 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
             c.readTimeout = 3000
             val token = Base64.encodeToString("app:${settings.webPassword}".toByteArray(), Base64.NO_WRAP)
             c.setRequestProperty("Authorization", "Basic $token")
-            c.inputStream.bufferedReader().use { it.readText() }.also { c.disconnect() }
+            try { c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
         } catch (e: Exception) {
             if (e !is java.net.ConnectException && !pollErrorLogged) {
                 pollErrorLogged = true
@@ -358,6 +460,7 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
         val routers = I2pdPage.routers(html)
         val tunnels = I2pdPage.clientTunnels(html)
         val rate = I2pdPage.successRate(html)
+        if (!running) return
         StatusBus.update { s ->
             val next = s.copy(
                 routers = routers ?: s.routers,
@@ -372,7 +475,9 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
         val j = try { JSONObject(line) } catch (_: Exception) { return }
         val state = j.optString("state")
         StatusBus.update { s ->
-            val ready = state == "ready"
+            val ready = state == "ready" && synchronized(procs) {
+                processNames.all { procs[it]?.isAliveCompat() == true }
+            }
             val next = s.copy(
                 rttMs = j.optLong("rtt_ms"),
                 up = j.optLong("up"),
@@ -417,8 +522,6 @@ class Engine(private val svc: VpnService, private val onFatal: () -> Unit) {
         const val I2PD = "i2pd"
         const val AGG = "agg-tunnel"
         const val MUX = "i2pmux"
-        const val MTU = 1500
-        const val DNS = "1.1.1.1"
     }
 }
 

@@ -24,6 +24,14 @@
             android:layout_height="wrap_content"
             android:text="@string/wordmark" />
 
+        <Button
+            android:id="@+id/open_settings"
+            style="@style/Button.Quiet"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:text="@string/action_settings" />
+
         <org.multipath.outproxy.BundleView
             android:id="@+id/bundle"
             android:layout_width="match_parent"

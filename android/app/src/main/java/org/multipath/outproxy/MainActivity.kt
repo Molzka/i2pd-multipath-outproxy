@@ -55,6 +55,8 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var status = Status()
+    private var autoConnectAttempted = false
+    private var samProbe = 0
     private val listener: (Status) -> Unit = { render(it) }
     private val ticker = object : Runnable {
         override fun run() {
@@ -68,6 +70,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         settings = Settings(this)
+        autoConnectAttempted = savedInstanceState?.getBoolean("auto_connect_attempted") ?: false
 
         bundle = findViewById(R.id.bundle)
         phase = findViewById(R.id.phase)
@@ -95,6 +98,18 @@ class MainActivity : Activity() {
         applyInsets()
         bindSettings()
         bindRouter()
+        address.isSaveEnabled = false
+        for (group in listOf(router, links, hops)) {
+            group.isSaveEnabled = false
+            for (i in 0 until group.childCount) group.getChildAt(i).isSaveEnabled = false
+        }
+        if (StatusBus.status.phase in setOf(Phase.STOPPED, Phase.ERROR)) {
+            savedInstanceState?.getString("address_draft")?.let(address::setText)
+        }
+
+        findViewById<Button>(R.id.open_settings).setOnClickListener {
+            startActivityForResult(Intent(this, SettingsActivity::class.java), REQ_SETTINGS)
+        }
 
         toggle.setOnClickListener { onToggle() }
         logToggle.setOnClickListener {
@@ -106,7 +121,7 @@ class MainActivity : Activity() {
         }
         logCopy.setOnClickListener {
             getSystemService(ClipboardManager::class.java)
-                .setPrimaryClip(ClipData.newPlainText("log", StatusBus.logText()))
+                .setPrimaryClip(ClipData.newPlainText("log", StatusBus.sanitizedLogText()))
             Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show()
         }
     }
@@ -116,6 +131,34 @@ class MainActivity : Activity() {
         StatusBus.listen(listener)
         handler.post(ticker)
         checkSam()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        maybeAutoConnect()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER)) {
+            autoConnectAttempted = false
+        }
+    }
+
+    private fun maybeAutoConnect() {
+        if (!autoConnectAttempted) {
+            autoConnectAttempted = true
+            if (settings.connectOnOpen && Settings.isValidAddress(settings.serverAddress) && !active) onToggle()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("auto_connect_attempted", autoConnectAttempted)
+        if (!active && !Settings.isValidAddress(address.text.toString())) {
+            outState.putString("address_draft", address.text.toString())
+        }
+        super.onSaveInstanceState(outState)
     }
 
 
@@ -172,9 +215,11 @@ class MainActivity : Activity() {
         samState.setText(R.string.sam_checking)
         samState.setTextColor(getColor(R.color.text_dim))
         val addr = settings.samAddress
+        val probe = ++samProbe
         Thread {
             val v = I2pdConf.probeSam(addr)
             handler.post {
+                if (isDestroyed || probe != samProbe || !settings.externalRouter || addr != settings.samAddress) return@post
                 samVersion = v
                 samChecked = true
                 renderSamState()
@@ -191,12 +236,16 @@ class MainActivity : Activity() {
                 samState.text = getString(R.string.sam_ok, v)
                 samState.setTextColor(getColor(R.color.ok))
             }
+            settings.samAddress != Settings.DEFAULT_SAM -> {
+                samState.text = getString(R.string.sam_unreachable_address, settings.samAddress)
+                samState.setTextColor(getColor(R.color.error))
+            }
             installedRouter() == null -> {
                 samState.setText(R.string.sam_no_router)
                 samState.setTextColor(getColor(R.color.error))
             }
             else -> {
-                samState.text = getString(R.string.sam_off_installed) + "\n" + getString(R.string.sam_off_running_hint)
+                samState.setText(R.string.sam_off_installed)
                 samState.setTextColor(getColor(R.color.accent))
             }
         }
@@ -223,6 +272,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        samProbe++
         StatusBus.unlisten(listener)
         handler.removeCallbacks(ticker)
         super.onStop()
@@ -235,18 +285,27 @@ class MainActivity : Activity() {
         val gutter = resources.getDimensionPixelSize(R.dimen.gutter)
         val top0 = content.paddingTop
         val bottom0 = content.paddingBottom
-        scroll.setOnApplyWindowInsetsListener { v, insets ->
-            val bars = if (Build.VERSION.SDK_INT >= 30)
+        var bars = IntArray(4)
+        fun updateWidth() {
+            val width = scroll.width - scroll.paddingLeft - scroll.paddingRight - bars[0] - bars[2]
+            if (width <= 0) return
+            val side = maxOf(gutter, (width - maxW) / 2)
+            content.setPadding(side + bars[0], top0 + bars[1], side + bars[2], bottom0 + bars[3])
+        }
+        scroll.setOnApplyWindowInsetsListener { _, insets ->
+            bars = if (Build.VERSION.SDK_INT >= 30)
                 insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
                     .let { intArrayOf(it.left, it.top, it.right, it.bottom) }
             else @Suppress("DEPRECATION")
                 intArrayOf(insets.systemWindowInsetLeft, insets.systemWindowInsetTop,
                     insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
-            val side = maxOf(gutter, (v.width - maxW) / 2)
-            content.setPadding(side + bars[0], top0 + bars[1], side + bars[2], bottom0 + bars[3])
+            updateWidth()
             insets
         }
-        scroll.addOnLayoutChangeListener { v, l, _, r, _, ol, _, or, _ -> if (r - l != or - ol) v.requestApplyInsets() }
+        scroll.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (right - left != oldRight - oldLeft) updateWidth()
+        }
+        scroll.requestApplyInsets()
     }
 
     private fun bindSettings() {
@@ -331,6 +390,20 @@ class MainActivity : Activity() {
                 if (resultCode == RESULT_OK) OutproxyVpnService.start(this)
                 else Toast.makeText(this, R.string.err_permission, Toast.LENGTH_LONG).show()
             REQ_CONF -> if (resultCode == RESULT_OK) data?.data?.let(::patchI2pdConf)
+            REQ_SETTINGS -> if (resultCode == RESULT_OK) {
+                address.setText(settings.serverAddress)
+                router.check(if (settings.externalRouter) R.id.router_external else R.id.router_builtin)
+                links.check(when (settings.links) {
+                    8 -> R.id.links_8
+                    24 -> R.id.links_24
+                    32 -> R.id.links_32
+                    else -> R.id.links_16
+                })
+                hops.check(when (settings.hops) { 1 -> R.id.hops_1; 2 -> R.id.hops_2; else -> R.id.hops_3 })
+                renderRouter()
+                checkSam()
+                render(StatusBus.status)
+            }
         }
     }
 
@@ -385,6 +458,7 @@ class MainActivity : Activity() {
         private const val REQ_VPN = 1
         private const val REQ_NOTIF = 2
         private const val REQ_CONF = 3
+        private const val REQ_SETTINGS = 4
 
         fun pendingIntent(c: Context): PendingIntent = PendingIntent.getActivity(
             c, 0, Intent(c, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE

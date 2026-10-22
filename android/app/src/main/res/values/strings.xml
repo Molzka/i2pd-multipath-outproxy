@@ -12,21 +12,22 @@
     <string name="phase_stopping">Отключение…</string>
     <string name="phase_error">Не удалось подключиться</string>
 
-    <string name="detail_stopped">Трафик телефона идёт напрямую, мимо I2P.</string>
+    <string name="detail_stopped">VPN отключён. Прямой доступ зависит от системной настройки «Блокировать соединения без VPN».</string>
     <string name="detail_starting">Запускаем i2pd, agg-tunnel и i2pmux.</string>
-    <string name="detail_bootstrap">Известно маршрутизаторов: %1$d. Первый запуск занимает 2–5 минут, интернет в других приложениях пока заблокирован.</string>
-    <string name="detail_tunnels">Готово туннелей: %1$d из %2$d. Интернет в других приложениях заблокирован до подключения.</string>
+    <string name="detail_bootstrap">Известно маршрутизаторов: %1$d. Первый запуск обычно занимает несколько минут. Приложения внутри VPN ожидают подключения.</string>
+    <string name="detail_tunnels">Готово туннелей: %1$d из %2$d. Приложения внутри VPN ожидают подключения.</string>
     <string name="detail_handshake">Туннелей: %1$d из %2$d. Ждём ответа выходного сервера.</string>
     <string name="phase_wait_router">Ждём i2pd</string>
     <string name="detail_starting_ext">Подключаемся к установленному i2pd по SAM.</string>
-    <string name="detail_sam_unreachable">i2pd не отвечает по SAM (127.0.0.1:7656). Запустите приложение i2pd и включите в нём SAM (кнопка ниже, раздел «Роутер I2P»). Интернет в других приложениях пока заблокирован.</string>
-    <string name="detail_sam_links">Ваш i2pd строит каналы: готово %1$d из %2$d. Интернет в других приложениях заблокирован до подключения.</string>
+    <string name="detail_sam_unreachable">SAM не отвечает по адресу %1$s. Запустите роутер и проверьте адрес в настройках. Приложения внутри VPN ожидают подключения.</string>
+    <string name="detail_sam_links">Ваш i2pd строит каналы: готово %1$d из %2$d. Приложения внутри VPN ожидают подключения.</string>
     <string name="detail_sam_handshake">Каналов: %1$d из %2$d. Ждём ответа выходного сервера.</string>
     <string name="detail_last_error">Последняя ошибка: %1$s</string>
-    <string name="detail_ready">Весь трафик идёт через I2P. Задержка %1$s с, соединений: %2$d.</string>
+    <string name="detail_ready">Трафик приложений внутри VPN идёт через I2P. Задержка %1$s с, соединений: %2$d.</string>
 
     <string name="action_connect">Подключить</string>
     <string name="action_disconnect">Отключить</string>
+    <string name="action_settings">Настройки</string>
 
     <string name="stat_up">отправлено</string>
     <string name="stat_down">получено</string>
@@ -41,13 +42,13 @@
     <string name="section_router">Роутер I2P</string>
     <string name="router_builtin">Встроенный</string>
     <string name="router_external">Установленный</string>
-    <string name="router_help_builtin">Приложение запускает собственный i2pd. Ничего ставить не нужно, но первый запуск занимает 2–5 минут.</string>
+    <string name="router_help_builtin">Приложение запускает собственный i2pd. Первый запуск требует времени на вход в сеть I2P.</string>
     <string name="router_help_external">Каналы создаются в уже установленном роутере (i2pd от PurpleI2P или Java I2P) через SAM. Роутер должен быть запущен; его собственный трафик идёт мимо VPN.</string>
     <string name="sam_checking">Проверяем SAM…</string>
     <string name="sam_ok">SAM отвечает (%1$s), можно подключаться.</string>
-    <string name="sam_off_installed">i2pd установлен, но SAM не отвечает. Нажмите «Включить SAM» и выберите файл i2pd/i2pd.conf, затем перезапустите i2pd.</string>
-    <string name="sam_off_running_hint">Если SAM уже включён, откройте i2pd и дождитесь запуска роутера.</string>
+    <string name="sam_off_installed">i2pd установлен, но SAM не отвечает. Нажмите «Включить SAM» и выберите файл i2pd/i2pd.conf, затем перезапустите i2pd.\nЕсли SAM уже включён, откройте i2pd и дождитесь запуска роутера.</string>
     <string name="sam_no_router">Роутер I2P не найден. Установите i2pd (PurpleI2P) или выберите «Встроенный».</string>
+    <string name="sam_unreachable_address">Нет ответа от %1$s. Проверьте адрес SAM в настройках и доступность роутера.</string>
     <string name="sam_fix">Включить SAM</string>
     <string name="open_i2pd">Открыть i2pd</string>
     <string name="sam_fixed">SAM включён в i2pd.conf. Перезапустите i2pd: в приложении i2pd остановите и снова запустите роутер.</string>
@@ -57,9 +58,9 @@
 
     <string name="section_tunnels">Каналы</string>
     <string name="links_label">Параллельных каналов</string>
-    <string name="links_help">Каждый канал это отдельный I2P-адрес со своими туннелями, их скорость складывается. Больше каналов: быстрее, но дольше запуск и больше расход батареи.</string>
+    <string name="links_help">Каналы передают данные параллельно. Больше каналов может повысить скорость, но увеличивает расход памяти и батареи.</string>
     <string name="hops_label">Прыжков на стороне телефона</string>
-    <string name="hops_help">3: максимум анонимности, 1: минимальная задержка. Сервер работает с 1 прыжком: его IP и так является выходным.</string>
+    <string name="hops_help">Больше прыжков увеличивает путь через сеть I2P и обычно задержку. Меньше прыжков снижает задержку, но сокращает число промежуточных узлов.</string>
     <string name="settings_locked">Отключитесь, чтобы изменить настройки.</string>
 
     <string name="log_show">Показать журнал</string>

@@ -30,7 +30,7 @@ object Texts {
 
     private fun externalDetail(c: Context, s: Status): String = when (s.phase) {
         Phase.STARTING -> c.getString(R.string.detail_starting_ext)
-        Phase.BOOTSTRAP -> c.getString(R.string.detail_sam_unreachable)
+        Phase.BOOTSTRAP -> c.getString(R.string.detail_sam_unreachable, Settings(c).samAddress)
         Phase.TUNNELS -> c.getString(R.string.detail_sam_links, s.clientTunnels, s.links)
         Phase.HANDSHAKE -> c.getString(R.string.detail_sam_handshake, s.clientTunnels, s.links) +
             (s.linkError?.let { "\n" + c.getString(R.string.detail_last_error, it) } ?: "")
