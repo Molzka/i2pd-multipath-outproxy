@@ -15,11 +15,13 @@ import (
 )
 
 type Server struct {
-	AllowPrivate bool
-	PreferIPv6   bool
-	OnlyIPv4     bool
-	Verbose      bool
-	DialTimeout  time.Duration
+	AllowPrivate  bool
+	PreferIPv6    bool
+	OnlyIPv4      bool
+	Verbose       bool
+	DialTimeout   time.Duration
+	OutboundSOCKS string
+	socksListen   *net.TCPAddr
 
 	active atomic.Int64
 }
@@ -152,6 +154,13 @@ func (s *Server) resolve(ctx context.Context, a Addr) ([]netip.Addr, byte) {
 func (s *Server) DialTCP(ctx context.Context, a Addr) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.DialTimeout)
 	defer cancel()
+	if s.OutboundSOCKS != "" {
+		if err := s.checkProxyDestination(a); err != nil {
+			return nil, err
+		}
+		conn, _, err := s.socksRequest(ctx, 1, a)
+		return conn, err
+	}
 	ips, code := s.resolve(ctx, a)
 	if code != statusOK {
 		return nil, statusError(code)
@@ -168,9 +177,15 @@ func (s *Server) DialTCP(ctx context.Context, a Addr) (net.Conn, error) {
 	return nil, lastErr
 }
 
-func (s *Server) DialUDP(ctx context.Context, a Addr) (*net.UDPConn, error) {
+func (s *Server) DialUDP(ctx context.Context, a Addr) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.DialTimeout)
 	defer cancel()
+	if s.OutboundSOCKS != "" {
+		if err := s.checkProxyDestination(a); err != nil {
+			return nil, err
+		}
+		return s.dialSOCKSUDP(ctx, a)
+	}
 	ips, code := s.resolve(ctx, a)
 	if code != statusOK {
 		return nil, statusError(code)
@@ -213,14 +228,14 @@ func (s *Server) NewDirectSocks() *SocksServer {
 	}
 }
 
-type connectedUDP struct{ *net.UDPConn }
+type connectedUDP struct{ net.Conn }
 
 func (c connectedUDP) ReadFrom(p []byte) (int, net.Addr, error) {
-	n, err := c.UDPConn.Read(p)
+	n, err := c.Conn.Read(p)
 	return n, c.RemoteAddr(), err
 }
 
-func (c connectedUDP) WriteTo(p []byte, _ net.Addr) (int, error) { return c.UDPConn.Write(p) }
+func (c connectedUDP) WriteTo(p []byte, _ net.Addr) (int, error) { return c.Conn.Write(p) }
 
 func (s *Server) handleUDP(st *yamux.Stream, a Addr) {
 	conn, err := s.DialUDP(context.Background(), a)
@@ -251,7 +266,10 @@ func (s *Server) handleUDP(st *yamux.Stream, a Addr) {
 				return
 			}
 			touch()
-			conn.Write(buf[:n])
+			if _, err := conn.Write(buf[:n]); err != nil {
+				conn.Close()
+				return
+			}
 		}
 	}()
 

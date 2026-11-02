@@ -4,6 +4,7 @@ server/i2pd/data/*
 client/i2pd/data/*
 !client/i2pd/data/i2pd.conf
 server/i2pd/.env
+server/multipath/.env
 server/OUTPROXY_ADDRESS.txt
 *_image.tar
 

@@ -14,6 +14,7 @@ android/*.jks
 android/hs_err_pid*.log
 android/replay_pid*.log
 server/i2pd/.env
+server/multipath/.env
 server/OUTPROXY_ADDRESS.txt
 server/i2pd/data
 client/i2pd/data

@@ -38,5 +38,13 @@ services:
     container_name: myi2pmux
     depends_on:
       - multipath
-    command: >-
-      i2pmux server -listen 127.0.0.1:1081 -socks 127.0.0.1:1080 -ipv4-only
+    command:
+      - i2pmux
+      - server
+      - -listen
+      - 127.0.0.1:1081
+      - -socks
+      - 127.0.0.1:1080
+      - -ipv4-only
+      - -outbound-socks
+      - "${I2PMUX_OUTBOUND_SOCKS:-}"
