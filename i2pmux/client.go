@@ -157,6 +157,8 @@ func (c *Client) pick() *slot {
 }
 
 func (c *Client) open(ctx context.Context, cmd byte, a Addr) (*yamux.Stream, *slot, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		sl := c.pick()
@@ -170,11 +172,26 @@ func (c *Client) open(ctx context.Context, cmd byte, a Addr) (*yamux.Stream, *sl
 			s.Close()
 			continue
 		}
-		if err := writeRequest(st, cmd, a); err != nil {
-			st.Close()
-			lastErr = err
-			continue
+		deadline, _ := ctx.Deadline()
+		st.SetDeadline(deadline)
+		stop := context.AfterFunc(ctx, func() { st.Abort() })
+		err = writeRequest(st, cmd, a)
+		if err == nil {
+			var status [1]byte
+			_, err = io.ReadFull(st, status[:])
+			if err == nil && status[0] != statusOK {
+				err = statusError(status[0])
+			}
 		}
+		stop()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		if err != nil {
+			st.Abort()
+			return nil, nil, err
+		}
+		st.SetDeadline(time.Time{})
 		sl.load.Add(16 << 10)
 		return st, sl, nil
 	}
@@ -333,33 +350,12 @@ func (c *Client) Status() Status {
 	return st
 }
 
-type statusReader struct {
-	once sync.Once
-	err  error
-}
-
-func (s *statusReader) check(r io.Reader) error {
-	s.once.Do(func() {
-		var b [1]byte
-		if _, err := io.ReadFull(r, b[:]); err != nil {
-			s.err = err
-		} else if b[0] != statusOK {
-			s.err = statusError(b[0])
-		}
-	})
-	return s.err
-}
-
 type tcpConn struct {
 	*yamux.Stream
-	s      *slot
-	status statusReader
+	s *slot
 }
 
 func (t *tcpConn) Read(p []byte) (int, error) {
-	if err := t.status.check(t.Stream); err != nil {
-		return 0, err
-	}
 	n, err := t.Stream.Read(p)
 	t.s.count(0, n)
 	return n, err
@@ -376,16 +372,12 @@ func (t *tcpConn) CloseWrite() error { return t.Stream.Close() }
 func (t *tcpConn) Close() error { return t.Stream.Abort() }
 
 type udpConn struct {
-	st     *yamux.Stream
-	s      *slot
-	dst    net.Addr
-	status statusReader
+	st  *yamux.Stream
+	s   *slot
+	dst net.Addr
 }
 
 func (u *udpConn) ReadFrom(p []byte) (int, net.Addr, error) {
-	if err := u.status.check(u.st); err != nil {
-		return 0, nil, err
-	}
 	n, err := readFrame(u.st, p)
 	u.s.count(0, n)
 	return n, u.dst, err

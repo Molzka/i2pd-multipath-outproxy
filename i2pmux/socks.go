@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const maxUDPFlows = 256
+
 type PacketFlow interface {
 	ReadFrom(p []byte) (int, net.Addr, error)
 	WriteTo(p []byte, addr net.Addr) (int, error)
@@ -80,6 +82,9 @@ func (s *SocksServer) handle(conn net.Conn) error {
 	if _, err := io.ReadFull(conn, req[:]); err != nil {
 		return err
 	}
+	if req[0] != 5 || req[2] != 0 {
+		return errors.New("invalid SOCKS5 request")
+	}
 	dst, err := readAddr(conn)
 	if err != nil {
 		return err
@@ -94,8 +99,15 @@ func (s *SocksServer) handle(conn net.Conn) error {
 		if err != nil {
 			code := byte(1)
 			var se statusError
-			if errors.As(err, &se) && byte(se) == statusDenied {
-				code = 2
+			if errors.As(err, &se) {
+				switch byte(se) {
+				case statusDenied:
+					code = 2
+				case statusResolve:
+					code = 4
+				case statusConnect:
+					code = 5
+				}
 			}
 			conn.Write([]byte{5, code, 0, 1, 0, 0, 0, 0, 0, 0})
 			return err
@@ -107,14 +119,19 @@ func (s *SocksServer) handle(conn net.Conn) error {
 		relay(conn, remote)
 		return nil
 	case 3:
-		return s.associate(conn)
+		return s.associate(conn, dst)
 	default:
 		conn.Write([]byte{5, 7, 0, 1, 0, 0, 0, 0, 0, 0})
 		return errors.New("unsupported command")
 	}
 }
 
-func (s *SocksServer) associate(ctrl net.Conn) error {
+func (s *SocksServer) associate(ctrl net.Conn, requested Addr) error {
+	peer := ctrl.RemoteAddr().(*net.TCPAddr).AddrPort().Addr().Unmap()
+	if requested.Host != "" || (requested.IP.IsValid() && !requested.IP.IsUnspecified() && requested.IP.Unmap() != peer) {
+		ctrl.Write([]byte{5, 2, 0, 1, 0, 0, 0, 0, 0, 0})
+		return errors.New("UDP client address differs from SOCKS connection")
+	}
 	local := ctrl.LocalAddr().(*net.TCPAddr)
 	pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: local.IP})
 	if err != nil {
@@ -131,7 +148,7 @@ func (s *SocksServer) associate(ctrl net.Conn) error {
 	var (
 		mu      sync.Mutex
 		flows   = map[string]PacketFlow{}
-		clientA netip.AddrPort
+		clientA = netip.AddrPortFrom(peer, requested.Port)
 	)
 	defer func() {
 		mu.Lock()
@@ -151,7 +168,8 @@ func (s *SocksServer) associate(ctrl net.Conn) error {
 		if err != nil {
 			return nil
 		}
-		if n < 4 || buf[2] != 0 {
+		from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
+		if from.Addr() != peer || n < 4 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 {
 			continue
 		}
 		r := &byteReader{b: buf[3:n]}
@@ -163,11 +181,21 @@ func (s *SocksServer) associate(ctrl net.Conn) error {
 		header := append([]byte(nil), buf[:n-len(payload)]...)
 
 		mu.Lock()
-		clientA = from
+		if clientA.Port() == 0 {
+			clientA = from
+		}
+		if from != clientA {
+			mu.Unlock()
+			continue
+		}
 		key := dst.String()
 		f := flows[key]
+		full := len(flows) >= maxUDPFlows
 		mu.Unlock()
 		if f == nil {
+			if full {
+				continue
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			f, err = s.DialUDP(ctx, dst)
 			cancel()
@@ -201,7 +229,14 @@ func (s *SocksServer) associate(ctrl net.Conn) error {
 				}
 			}(f, key, header)
 		}
-		f.WriteTo(payload, nil)
+		if _, err := f.WriteTo(payload, nil); err != nil {
+			f.Close()
+			mu.Lock()
+			if flows[key] == f {
+				delete(flows, key)
+			}
+			mu.Unlock()
+		}
 	}
 }
 
