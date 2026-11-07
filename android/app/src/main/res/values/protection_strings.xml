@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="phase_waiting">Нет сети</string>
+    <string name="phase_blocked">Трафик заблокирован</string>
+    <string name="detail_waiting">Ждём Wi-Fi или мобильную сеть. VPN остаётся включён.</string>
+    <string name="detail_blocked">%1$s\n\nVPN остаётся включён: приложения, направленные в туннель, не выйдут напрямую. Повторите подключение или отключите VPN вручную.</string>
+    <string name="action_retry">Повторить подключение</string>
+    <string name="protection_on">Android блокирует соединения вне VPN. Исключённые приложения тоже останутся без сети.</string>
+    <string name="protection_off">Системная блокировка выключена. После отключения VPN или остановки приложения интернет может пойти напрямую.</string>
+    <string name="protection_unknown">Блокировка при остановке приложения: проверьте настройки Android.</string>
+    <string name="protection_settings">Защита в настройках Android</string>
+</resources>

@@ -8,6 +8,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.VpnService
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -29,13 +33,53 @@ class OutproxyVpnService : VpnService() {
     @Volatile private var latestStartId = 0
     private var engineRequest = 0
     private var engineStartId = 0
-    private val listener: (Status) -> Unit = { updateNotification(it) }
+    private val listener: (Status) -> Unit = {
+        refreshProtection()
+        updateNotification(it)
+    }
+    private val networks = mutableSetOf<Network>()
+    private var hadNetwork = false
+    private var monitoringNetwork = false
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(next: Network) {
+            if (!networks.add(next)) return
+            val changed = hadNetwork
+            hadNetwork = true
+            notifyNetwork(true, changed)
+        }
+        override fun onLost(lost: Network) {
+            if (!networks.remove(lost)) return
+            val available = networks.isNotEmpty()
+            notifyNetwork(available, available)
+        }
+    }
+
+    private fun notifyNetwork(available: Boolean, changed: Boolean) {
+        val current = engine ?: return
+        try {
+            worker.execute { if (!destroyed && engine === current) current.networkChanged(available, changed) }
+        } catch (_: RejectedExecutionException) {}
+    }
+
+    private fun refreshProtection() {
+        if (Build.VERSION.SDK_INT >= 29) {
+            StatusBus.update { it.copy(alwaysOn = isAlwaysOn, lockdown = isLockdownEnabled) }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, getString(R.string.notif_channel), NotificationManager.IMPORTANCE_LOW)
         )
+        try {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build()
+            getSystemService(ConnectivityManager::class.java).registerNetworkCallback(request, networkCallback, main)
+            monitoringNetwork = true
+        } catch (_: RuntimeException) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -46,9 +90,22 @@ class OutproxyVpnService : VpnService() {
             return START_NOT_STICKY
         }
         val connectionSettings = Settings(this).snapshot()
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val initialNetwork = connectivity.activeNetwork
+        val initialCapabilities = connectivity.getNetworkCapabilities(initialNetwork)
+        val networkAvailable = networks.isNotEmpty() || (
+            initialCapabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+                initialCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            )
         goForeground(StatusBus.status)
         worker.execute {
             if (destroyed || request != requests.get()) return@execute
+            if (engine?.isBlocking == true) {
+                engineRequest = request
+                engineStartId = startId
+                engine?.start()
+                return@execute
+            }
             if (engine?.isRunning == true) {
                 engineRequest = request
                 engineStartId = startId
@@ -72,6 +129,7 @@ class OutproxyVpnService : VpnService() {
                     }
                 }
                 engine = next
+                next.networkChanged(networkAvailable, false)
                 if (destroyed || request != requests.get()) next.requestStop()
                 next.start()
             } catch (e: Exception) {
@@ -114,6 +172,10 @@ class OutproxyVpnService : VpnService() {
 
     override fun onDestroy() {
         destroyed = true
+        if (monitoringNetwork) {
+            getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback)
+            monitoringNetwork = false
+        }
         requests.incrementAndGet()
         StatusBus.unlisten(listener)
         engine?.requestStop()
@@ -158,7 +220,11 @@ class OutproxyVpnService : VpnService() {
             this, 1, Intent(this, OutproxyVpnService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        return Notification.Builder(this, CHANNEL)
+        val retry = PendingIntent.getService(
+            this, 2, Intent(this, OutproxyVpnService::class.java).setAction(ACTION_START),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(Texts.headline(this, s))
             .setContentText(Texts.detail(this, s))
@@ -166,7 +232,10 @@ class OutproxyVpnService : VpnService() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .addAction(Notification.Action.Builder(null, getString(R.string.action_disconnect), stop).build())
-            .build()
+        if (s.phase == Phase.BLOCKED) {
+            notification.addAction(Notification.Action.Builder(null, getString(R.string.action_retry), retry).build())
+        }
+        return notification.build()
     }
 
     companion object {

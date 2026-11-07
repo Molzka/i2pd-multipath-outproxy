@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profiles_title">Профили</string>
+    <string name="profiles_back">Назад</string>
+    <string name="profiles_help">Нажмите на профиль, чтобы выбрать, переименовать или перенести его на другое устройство.</string>
+    <string name="profiles_locked">Отключите VPN, чтобы менять профили. Экспорт остаётся доступен.</string>
+    <string name="profile_current">Профиль: %1$s</string>
+    <string name="profile_default">Основной</string>
+    <string name="profile_selected">%1$s · выбран</string>
+    <string name="profile_no_address">Адрес сервера ещё не указан</string>
+    <string name="profile_actions">Действия с профилем %1$s</string>
+    <string name="profile_new">Добавить профиль</string>
+    <string name="profile_use">Использовать</string>
+    <string name="profile_rename">Переименовать</string>
+    <string name="profile_delete">Удалить</string>
+    <string name="profile_delete_title">Удалить «%1$s»?</string>
+    <string name="profile_delete_help">Удалятся только настройки этого профиля. Сервер продолжит работать.</string>
+    <string name="profile_name_hint">Например, домашний сервер</string>
+    <string name="profile_name_error">Введите название до 48 символов без переносов строк.</string>
+    <string name="profile_limit">Можно сохранить до 32 профилей.</string>
+    <string name="profile_reading">Читаем профиль…</string>
+    <string name="profile_import">Импортировать из файла</string>
+    <string name="profile_scan">Сканировать QR</string>
+    <string name="profile_scan_prompt">Наведите камеру на QR профиля Multipath I2P</string>
+    <string name="profile_export">Экспортировать в файл</string>
+    <string name="profile_show_qr">Показать QR</string>
+    <string name="profile_close">Закрыть</string>
+    <string name="profile_import_title">Добавить «%1$s»?</string>
+    <string name="profile_preview">Сервер: %1$s\nDNS: %2$s\nКаналы: %3$d\nПрыжки: %4$d\nMTU: %5$d\nРоутер: %6$s\n\nПодключение само не запустится. Исключения приложений и ключи роутера не переносятся.</string>
+    <string name="profile_router_sam">Внешний SAM, %1$s</string>
+    <string name="profile_add">Добавить и выбрать</string>
+    <string name="profile_invalid">Это не поддерживаемый профиль Multipath I2P или в нём неверные настройки.</string>
+    <string name="profile_file_error">Не удалось прочитать или сохранить файл. Выберите JSON-профиль размером до 16 КБ.</string>
+    <string name="profile_imported">Профиль добавлен. Подключение запускается вручную.</string>
+    <string name="profile_exported">Профиль сохранён</string>
+    <string name="profile_qr_error">Не удалось создать QR. Используйте экспорт в файл.</string>
+    <string name="profile_qr_description">QR для переноса профиля %1$s</string>
+    <string name="profile_share_help">Передавайте файл или QR только тем, кому нужен доступ к этому серверу.</string>
+</resources>

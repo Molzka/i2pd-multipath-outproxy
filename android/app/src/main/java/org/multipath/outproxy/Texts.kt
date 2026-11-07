@@ -13,17 +13,23 @@ object Texts {
             Phase.HANDSHAKE -> R.string.phase_handshake
             Phase.READY -> R.string.phase_ready
             Phase.STOPPING -> R.string.phase_stopping
+            Phase.WAITING -> R.string.phase_waiting
+            Phase.BLOCKED -> R.string.phase_blocked
             Phase.ERROR -> R.string.phase_error
         }
     )
 
-    fun detail(c: Context, s: Status): String = if (s.external) externalDetail(c, s) else when (s.phase) {
+    fun detail(c: Context, s: Status): String = if (s.phase == Phase.BLOCKED)
+        c.getString(R.string.detail_blocked, s.error.orEmpty())
+    else if (s.phase == Phase.WAITING) c.getString(R.string.detail_waiting)
+    else if (s.external) externalDetail(c, s) else when (s.phase) {
         Phase.STOPPED -> c.getString(R.string.detail_stopped)
         Phase.STARTING -> c.getString(R.string.detail_starting)
         Phase.BOOTSTRAP -> c.getString(R.string.detail_bootstrap, s.routers)
         Phase.TUNNELS -> c.getString(R.string.detail_tunnels, s.clientTunnels, s.expectedTunnels)
         Phase.HANDSHAKE -> c.getString(R.string.detail_handshake, s.clientTunnels, s.expectedTunnels)
         Phase.READY -> c.getString(R.string.detail_ready, seconds(s.rttMs), s.streams)
+        Phase.WAITING, Phase.BLOCKED -> ""
         Phase.STOPPING -> ""
         Phase.ERROR -> s.error ?: ""
     }
@@ -37,6 +43,7 @@ object Texts {
         Phase.READY -> c.getString(R.string.detail_ready, seconds(s.rttMs), s.streams)
         Phase.ERROR -> s.error ?: ""
         Phase.STOPPED -> c.getString(R.string.detail_stopped)
+        Phase.WAITING, Phase.BLOCKED -> ""
         Phase.STOPPING -> ""
     }
 

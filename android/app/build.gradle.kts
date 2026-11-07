@@ -28,8 +28,8 @@ android {
         applicationId = "org.multipath.outproxy"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
         buildConfigField("String", "I2PD_VERSION", "\"$i2pdVersion\"")
     }
 
@@ -110,4 +110,10 @@ val verifyBundledI2pd = tasks.register("verifyBundledI2pd") {
 
 tasks.configureEach {
     if (name == "mergeDebugNativeLibs" || name == "mergeReleaseNativeLibs") dependsOn(verifyBundledI2pd)
+}
+
+dependencies {
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.core:core:1.16.0")
 }

@@ -29,6 +29,7 @@ import android.widget.TextView
 import android.widget.Toast
 
 class MainActivity : Activity() {
+    private lateinit var profiles: Profiles
     private lateinit var settings: Settings
     private lateinit var bundle: BundleView
     private lateinit var phase: TextView
@@ -57,6 +58,7 @@ class MainActivity : Activity() {
     private var status = Status()
     private var autoConnectAttempted = false
     private var samProbe = 0
+    private var displayedProfileId = ""
     private val listener: (Status) -> Unit = { render(it) }
     private val ticker = object : Runnable {
         override fun run() {
@@ -70,6 +72,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         settings = Settings(this)
+        profiles = Profiles(this)
+        displayedProfileId = profiles.selectedId
         autoConnectAttempted = savedInstanceState?.getBoolean("auto_connect_attempted") ?: false
 
         bundle = findViewById(R.id.bundle)
@@ -104,14 +108,24 @@ class MainActivity : Activity() {
             for (i in 0 until group.childCount) group.getChildAt(i).isSaveEnabled = false
         }
         if (StatusBus.status.phase in setOf(Phase.STOPPED, Phase.ERROR)) {
-            savedInstanceState?.getString("address_draft")?.let(address::setText)
+            if (savedInstanceState?.getString("draft_profile") == profiles.selectedId) {
+                savedInstanceState.getString("address_draft")?.let(address::setText)
+            }
         }
 
         findViewById<Button>(R.id.open_settings).setOnClickListener {
             startActivityForResult(Intent(this, SettingsActivity::class.java), REQ_SETTINGS)
         }
 
+        findViewById<Button>(R.id.open_profiles).setOnClickListener {
+            startActivityForResult(Intent(this, ProfilesActivity::class.java), REQ_PROFILES)
+        }
         toggle.setOnClickListener { onToggle() }
+        findViewById<Button>(R.id.stop_blocked).setOnClickListener { OutproxyVpnService.stop(this) }
+        findViewById<Button>(R.id.open_vpn_protection).setOnClickListener {
+            try { startActivity(Intent(android.provider.Settings.ACTION_VPN_SETTINGS)) }
+            catch (_: Exception) { Toast.makeText(this, R.string.settings_vpn_unavailable, Toast.LENGTH_LONG).show() }
+        }
         logToggle.setOnClickListener {
             val show = log.visibility != View.VISIBLE
             log.visibility = if (show) View.VISIBLE else View.GONE
@@ -135,6 +149,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (profiles.selectedId != displayedProfileId && !active) {
+            autoConnectAttempted = true
+            refreshSettings()
+        }
         maybeAutoConnect()
     }
 
@@ -157,6 +175,7 @@ class MainActivity : Activity() {
         outState.putBoolean("auto_connect_attempted", autoConnectAttempted)
         if (!active && !Settings.isValidAddress(address.text.toString())) {
             outState.putString("address_draft", address.text.toString())
+            outState.putString("draft_profile", profiles.selectedId)
         }
         super.onSaveInstanceState(outState)
     }
@@ -352,6 +371,10 @@ class MainActivity : Activity() {
     private val active get() = status.phase != Phase.STOPPED && status.phase != Phase.ERROR
 
     private fun onToggle() {
+        if (status.phase == Phase.BLOCKED) {
+            OutproxyVpnService.start(this)
+            return
+        }
         if (active) {
             OutproxyVpnService.stop(this)
             return
@@ -390,28 +413,34 @@ class MainActivity : Activity() {
                 if (resultCode == RESULT_OK) OutproxyVpnService.start(this)
                 else Toast.makeText(this, R.string.err_permission, Toast.LENGTH_LONG).show()
             REQ_CONF -> if (resultCode == RESULT_OK) data?.data?.let(::patchI2pdConf)
-            REQ_SETTINGS -> if (resultCode == RESULT_OK) {
-                address.setText(settings.serverAddress)
-                router.check(if (settings.externalRouter) R.id.router_external else R.id.router_builtin)
-                links.check(when (settings.links) {
-                    8 -> R.id.links_8
-                    24 -> R.id.links_24
-                    32 -> R.id.links_32
-                    else -> R.id.links_16
-                })
-                hops.check(when (settings.hops) { 1 -> R.id.hops_1; 2 -> R.id.hops_2; else -> R.id.hops_3 })
-                renderRouter()
-                checkSam()
-                render(StatusBus.status)
+            REQ_SETTINGS, REQ_PROFILES -> if (resultCode == RESULT_OK) {
+                refreshSettings()
             }
         }
     }
 
 
+    private fun refreshSettings() {
+        displayedProfileId = profiles.selectedId
+        address.setText(settings.serverAddress)
+        router.check(if (settings.externalRouter) R.id.router_external else R.id.router_builtin)
+        links.check(when (settings.links) {
+            8 -> R.id.links_8
+            24 -> R.id.links_24
+            32 -> R.id.links_32
+            else -> R.id.links_16
+        })
+        hops.check(when (settings.hops) { 1 -> R.id.hops_1; 2 -> R.id.hops_2; else -> R.id.hops_3 })
+        renderRouter()
+        checkSam()
+        render(StatusBus.status)
+    }
+
     private fun render(s: Status) {
         status = s
+        findViewById<Button>(R.id.open_profiles).text = getString(R.string.profile_current, profiles.selected().name)
         phase.text = Texts.headline(this, s)
-        phase.setTextColor(getColor(if (s.phase == Phase.ERROR) R.color.error else R.color.text))
+        phase.setTextColor(getColor(if (s.phase in setOf(Phase.ERROR, Phase.BLOCKED)) R.color.error else R.color.text))
         detail.text = Texts.detail(this, s)
 
         val linksNow = if (active) s.links else settings.links
@@ -420,14 +449,14 @@ class MainActivity : Activity() {
             if (active) BundleView.litLinks(s) else 0,
             when (s.phase) {
                 Phase.READY -> BundleView.ExitState.READY
-                Phase.ERROR -> BundleView.ExitState.ERROR
+                Phase.ERROR, Phase.BLOCKED -> BundleView.ExitState.ERROR
                 Phase.STOPPED, Phase.STOPPING -> BundleView.ExitState.IDLE
                 else -> BundleView.ExitState.BUILDING
             },
         )
 
         if (active) {
-            toggle.setText(R.string.action_disconnect)
+            toggle.setText(if (s.phase == Phase.BLOCKED) R.string.action_retry else R.string.action_disconnect)
             toggle.setBackgroundResource(R.drawable.btn_quiet)
             toggle.setTextColor(getColor(R.color.text))
         } else {
@@ -436,6 +465,12 @@ class MainActivity : Activity() {
             toggle.setTextColor(getColor(R.color.bg))
         }
         toggle.isEnabled = s.phase != Phase.STOPPING
+        findViewById<View>(R.id.stop_blocked).visibility = if (s.phase == Phase.BLOCKED) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.protection_state).setText(when {
+            !active || s.lockdown == null -> R.string.protection_unknown
+            s.lockdown -> R.string.protection_on
+            else -> R.string.protection_off
+        })
 
         val editable = !active
         address.isEnabled = editable
@@ -459,6 +494,7 @@ class MainActivity : Activity() {
         private const val REQ_NOTIF = 2
         private const val REQ_CONF = 3
         private const val REQ_SETTINGS = 4
+        private const val REQ_PROFILES = 5
 
         fun pendingIntent(c: Context): PendingIntent = PendingIntent.getActivity(
             c, 0, Intent(c, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE

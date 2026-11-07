@@ -45,6 +45,9 @@ internal class Engine(
     private var monitor: ScheduledFuture<*>? = null
     private var pollErrorLogged = false
     private var nextPollAt = 0L
+    private var networkAvailable = true
+
+    val isBlocking: Boolean get() = !running && !cancelled && tun != null
 
     val isRunning: Boolean get() = running && !cancelled
 
@@ -56,8 +59,11 @@ internal class Engine(
     fun start() {
         if (cancelled) return
         running = true
+        restarts.clear()
+        retryAfter.clear()
+        nextPollAt = 0L
         StatusBus.update {
-            Status(phase = Phase.STARTING, links = links, expectedTunnels = expectedTunnels,
+            Status(phase = if (networkAvailable) Phase.STARTING else Phase.WAITING, links = links, expectedTunnels = expectedTunnels,
                 startedAt = System.currentTimeMillis(), external = external)
         }
         try {
@@ -65,13 +71,13 @@ internal class Engine(
             killStale()
             prepareFiles()
             if (!running) return
-            tun = establish()
+            if (tun == null) tun = establish()
             startAll()
             if (!running) return
             monitor = worker.scheduleWithFixedDelay({
                 if (running) {
                     try {
-                        checkProcesses()
+                        if (networkAvailable) checkProcesses()
                         val now = SystemClock.elapsedRealtime()
                         if (running && !external && now >= nextPollAt) {
                             pollI2pd()
@@ -101,13 +107,9 @@ internal class Engine(
         requestStop()
         if (!hadResources) return
         StatusBus.update { it.copy(phase = Phase.STOPPING) }
-        val processes = synchronized(procs) {
-            processNames.reversed().mapNotNull { procs.remove(it) }
-        }
-        for (p in processes) try { p.destroy() } catch (_: Exception) {}
+        stopProcesses()
         try { tun?.close() } catch (_: Exception) {}
         tun = null
-        for (p in processes) stopProcess(p)
         StatusBus.update {
             Status(phase = Phase.STOPPED, links = links, expectedTunnels = expectedTunnels, external = external)
         }
@@ -115,9 +117,40 @@ internal class Engine(
 
     private fun fail(msg: String) {
         if (cancelled) return
-        stop()
-        StatusBus.update { it.copy(phase = Phase.ERROR, error = msg) }
-        onFatal()
+        if (tun == null) {
+            stop()
+            StatusBus.update { it.copy(phase = Phase.ERROR, error = msg) }
+            onFatal()
+            return
+        }
+        running = false
+        monitor?.cancel(false)
+        stopProcesses()
+        StatusBus.update { it.copy(phase = Phase.BLOCKED, error = msg, readySince = 0, streams = 0) }
+    }
+
+    private fun stopProcesses() {
+        val processes = synchronized(procs) { processNames.reversed().mapNotNull { procs.remove(it) } }
+        for (p in processes) try { p.destroy() } catch (_: Exception) {}
+        for (p in processes) stopProcess(p)
+    }
+
+    fun networkChanged(available: Boolean, changed: Boolean) {
+        networkAvailable = available
+        if (!running || cancelled) return
+        StatusBus.update { s -> s.copy(readySince = 0, rttMs = 0).let { it.copy(phase = phaseOf(it)) } }
+        if (!available || !changed) return
+        try {
+            for (name in listOf(MUX, AGG)) {
+                synchronized(procs) { procs.remove(name) }?.let { it.destroy(); stopProcess(it) }
+                restarts.remove(name)
+                retryAfter.remove(name)
+            }
+            startProcess(AGG)
+            startProcess(MUX)
+        } catch (e: Exception) {
+            fail(e.message ?: e.toString())
+        }
     }
 
 
@@ -509,6 +542,7 @@ internal class Engine(
 
     private fun phaseOf(s: Status): Phase = when {
         !running -> s.phase
+        !networkAvailable -> Phase.WAITING
         s.readySince > 0 -> Phase.READY
         external && !s.samReachable -> Phase.BOOTSTRAP
         !external && s.routers < 50 -> Phase.BOOTSTRAP

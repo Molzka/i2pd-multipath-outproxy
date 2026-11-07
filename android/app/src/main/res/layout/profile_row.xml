@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="@dimen/s2"
+    android:orientation="vertical" android:padding="@dimen/s4" android:background="@drawable/btn_quiet"
+    android:minHeight="@dimen/button_h" android:clickable="true" android:focusable="true">
+    <TextView android:id="@+id/profile_name" style="@style/Text.Body" android:layout_width="match_parent" android:layout_height="wrap_content" />
+    <TextView android:id="@+id/profile_address" style="@style/Text.Help" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/s2" android:maxLines="1" android:ellipsize="middle" android:fontFamily="@font/plex_mono_regular" />
+</LinearLayout>

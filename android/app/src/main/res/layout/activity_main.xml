@@ -63,6 +63,32 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/s5" />
 
+        <Button
+            android:id="@+id/stop_blocked"
+            style="@style/Button.Quiet"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:text="@string/action_disconnect"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/protection_state"
+            style="@style/Text.Help"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:accessibilityLiveRegion="polite"
+            android:text="@string/protection_unknown" />
+
+        <Button
+            android:id="@+id/open_vpn_protection"
+            style="@style/Button.Quiet"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:text="@string/protection_settings" />
+
         <LinearLayout
             android:id="@+id/stats"
             android:layout_width="match_parent"
@@ -97,6 +123,14 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/s5"
             android:text="@string/section_server" />
+
+        <Button
+            android:id="@+id/open_profiles"
+            style="@style/Button.Quiet"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:text="@string/profiles_title" />
 
         <EditText
             android:id="@+id/address"

@@ -7,7 +7,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
-enum class Phase { STOPPED, STARTING, BOOTSTRAP, TUNNELS, HANDSHAKE, READY, STOPPING, ERROR }
+enum class Phase { STOPPED, STARTING, BOOTSTRAP, TUNNELS, HANDSHAKE, READY, WAITING, BLOCKED, STOPPING, ERROR }
 
 data class Status(
     val phase: Phase = Phase.STOPPED,
@@ -24,6 +24,8 @@ data class Status(
     val readySince: Long = 0,
     val error: String? = null,
     val external: Boolean = false,
+    val alwaysOn: Boolean? = null,
+    val lockdown: Boolean? = null,
     val samReachable: Boolean = false,
     val linkError: String? = null,
 )
