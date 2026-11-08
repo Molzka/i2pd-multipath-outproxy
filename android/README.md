@@ -22,7 +22,7 @@ sh android/build.sh
 
 Сохраните `android/release.jks` и `android/keystore.properties`. Без прежнего ключа обновление не установится поверх вашей сборки. Эти файлы в Git не добавляются.
 
-[Готовые APK](https://github.com/Molzka/i2pd-multipath-outproxy/releases/tag/v1.3.0)
+[Готовые APK](https://github.com/Molzka/i2pd-multipath-outproxy/releases/tag/v1.3.1)
 
 ## Профили
 
