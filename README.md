@@ -4,10 +4,10 @@ Android VPN и Linux SOCKS5 через несколько параллельны
 
 ## Android
 
-Готовые APK — версия 1.2.0, встроенный i2pd 3.0.0. Android 8 и новее. В исходниках — 1.3.0 с профилями и исправлениями подключения; APK этой версии нужно собрать самостоятельно.
+Версия 1.3.0, встроенный i2pd 3.0.0. Android 8 и новее.
 
-- [Скачать APK для ARM64](https://github.com/Molzka/i2pd-multipath-outproxy/releases/download/v1.2.0/multipath-i2p-1.2.0-arm64-v8a.apk)
-- [Скачать APK для x86_64](https://github.com/Molzka/i2pd-multipath-outproxy/releases/download/v1.2.0/multipath-i2p-1.2.0-x86_64.apk)
+- [Скачать APK для ARM64](https://github.com/Molzka/i2pd-multipath-outproxy/releases/download/v1.3.0/multipath-i2p-1.3.0-arm64-v8a.apk)
+- [Скачать APK для x86_64](https://github.com/Molzka/i2pd-multipath-outproxy/releases/download/v1.3.0/multipath-i2p-1.3.0-x86_64.apk)
 
 Вставьте адрес сервера и нажмите «Подключить». Первый запуск i2pd требует времени на вход в сеть.
 
@@ -17,7 +17,7 @@ Android VPN и Linux SOCKS5 через несколько параллельны
 
 Сам клиент и приложения-роутеры обходят VPN. Если включить в Android блокировку соединений без VPN, внешний роутер потеряет доступ к сети — используйте встроенный.
 
-[Релиз 1.2.0](https://github.com/Molzka/i2pd-multipath-outproxy/releases/tag/v1.2.0) · [Сборка APK](android/README.md)
+[Релиз 1.3.0](https://github.com/Molzka/i2pd-multipath-outproxy/releases/tag/v1.3.0) · [Сборка APK](android/README.md)
 
 ## Сервер
 
