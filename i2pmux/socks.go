@@ -11,7 +11,15 @@ import (
 	"time"
 )
 
-const maxUDPFlows = 256
+const (
+	maxUDPFlows        = 256
+	maxPendingUDPFlows = 8
+	udpFlowQueueSize   = 8
+)
+
+type socksUDPFlow struct {
+	packets chan []byte
+}
 
 type PacketFlow interface {
 	ReadFrom(p []byte) (int, net.Addr, error)
@@ -145,20 +153,17 @@ func (s *SocksServer) associate(ctrl net.Conn, requested Addr) error {
 		return err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var (
 		mu      sync.Mutex
-		flows   = map[string]PacketFlow{}
+		flows   = map[string]*socksUDPFlow{}
 		clientA = netip.AddrPortFrom(peer, requested.Port)
 	)
-	defer func() {
-		mu.Lock()
-		for _, f := range flows {
-			f.Close()
-		}
-		mu.Unlock()
-	}()
+	opening := make(chan struct{}, maxPendingUDPFlows)
 	go func() {
 		io.Copy(io.Discard, ctrl)
+		cancel()
 		pc.Close()
 	}()
 
@@ -178,8 +183,6 @@ func (s *SocksServer) associate(ctrl net.Conn, requested Addr) error {
 			continue
 		}
 		payload := r.b
-		header := append([]byte(nil), buf[:n-len(payload)]...)
-
 		mu.Lock()
 		if clientA.Port() == 0 {
 			clientA = from
@@ -190,52 +193,75 @@ func (s *SocksServer) associate(ctrl net.Conn, requested Addr) error {
 		}
 		key := dst.String()
 		f := flows[key]
-		full := len(flows) >= maxUDPFlows
-		mu.Unlock()
 		if f == nil {
-			if full {
+			if len(flows) >= maxUDPFlows {
+				mu.Unlock()
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			f, err = s.DialUDP(ctx, dst)
-			cancel()
-			if err != nil {
+			select {
+			case opening <- struct{}{}:
+			default:
+				mu.Unlock()
 				continue
 			}
-			mu.Lock()
+			f = &socksUDPFlow{packets: make(chan []byte, udpFlowQueueSize)}
 			flows[key] = f
-			mu.Unlock()
-			go func(f PacketFlow, key string, header []byte) {
+			header := append([]byte(nil), buf[:n-len(payload)]...)
+			to := clientA
+			go func(f *socksUDPFlow, key string, dst Addr, header []byte) {
 				defer func() {
-					f.Close()
 					mu.Lock()
 					if flows[key] == f {
 						delete(flows, key)
 					}
 					mu.Unlock()
 				}()
-				rb := make([]byte, maxUDPPayload)
-				for {
-					f.SetReadDeadline(time.Now().Add(2 * time.Minute))
-					m, _, err := f.ReadFrom(rb)
-					if err != nil {
-						return
-					}
-					mu.Lock()
-					to := clientA
-					mu.Unlock()
-					out := append(append([]byte(nil), header...), rb[:m]...)
-					pc.WriteToUDPAddrPort(out, to)
+				flowCtx, stopFlow := context.WithCancel(ctx)
+				defer stopFlow()
+				dialCtx, stopDial := context.WithTimeout(flowCtx, 10*time.Second)
+				remote, err := s.DialUDP(dialCtx, dst)
+				stopDial()
+				<-opening
+				if err != nil {
+					return
 				}
-			}(f, key, header)
+				defer remote.Close()
+				stopClose := context.AfterFunc(flowCtx, func() { remote.Close() })
+				defer stopClose()
+				go func() {
+					defer stopFlow()
+					rb := make([]byte, maxUDPPayload)
+					for {
+						remote.SetReadDeadline(time.Now().Add(2 * time.Minute))
+						m, _, err := remote.ReadFrom(rb)
+						if err != nil {
+							return
+						}
+						out := append(append([]byte(nil), header...), rb[:m]...)
+						if _, err := pc.WriteToUDPAddrPort(out, to); err != nil {
+							return
+						}
+					}
+				}()
+				for {
+					select {
+					case <-flowCtx.Done():
+						return
+					case payload := <-f.packets:
+						if flowCtx.Err() != nil {
+							return
+						}
+						if _, err := remote.WriteTo(payload, nil); err != nil {
+							return
+						}
+					}
+				}
+			}(f, key, dst, header)
 		}
-		if _, err := f.WriteTo(payload, nil); err != nil {
-			f.Close()
-			mu.Lock()
-			if flows[key] == f {
-				delete(flows, key)
-			}
-			mu.Unlock()
+		mu.Unlock()
+		// A slow destination may drop UDP packets, but cannot delay other flows.
+		if len(f.packets) < cap(f.packets) {
+			f.packets <- append([]byte(nil), payload...)
 		}
 	}
 }

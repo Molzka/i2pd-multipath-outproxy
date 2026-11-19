@@ -37,36 +37,88 @@ type samLinks struct {
 
 var errNotReady = errors.New("link session not ready")
 
+const maxSAMLine = 16 * 1024
+
 func (s *samLinks) setErr(err string) {
 	s.mu.Lock()
 	s.lastErr = err
 	s.mu.Unlock()
 }
 
-func samDial(ctx context.Context, addr string) (net.Conn, *bufio.Reader, error) {
+func readSAMLine(r *bufio.Reader) (string, error) {
+	line, err := r.ReadSlice('\n')
+	if errors.Is(err, bufio.ErrBufferFull) {
+		return "", errors.New("SAM control line exceeds 16 KiB")
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(string(line), "\n"), "\r"), nil
+}
+
+// Keepalives can precede a command reply as well as arrive on an idle session.
+func readSAMReply(c net.Conn, r *bufio.Reader, keepalive bool) (string, error) {
+	for {
+		line, err := readSAMLine(r)
+		if err != nil {
+			return "", err
+		}
+		if keepalive && (line == "PING" || strings.HasPrefix(line, "PING ")) {
+			c.SetWriteDeadline(time.Now().Add(15 * time.Second))
+			_, err := io.WriteString(c, "PONG"+line[len("PING"):]+"\n")
+			c.SetWriteDeadline(time.Time{})
+			if err != nil {
+				return "", err
+			}
+			continue
+		}
+		if line == "" || (keepalive && (line == "PONG" || strings.HasPrefix(line, "PONG "))) {
+			continue
+		}
+		return line, nil
+	}
+}
+
+func samDial(ctx context.Context, addr string) (net.Conn, *bufio.Reader, bool, error) {
 	var d net.Dialer
 	c, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
 	lowLatency(c)
-	r := bufio.NewReader(c)
+	r := bufio.NewReaderSize(c, maxSAMLine)
 	c.SetDeadline(time.Now().Add(15 * time.Second))
 	if _, err := io.WriteString(c, "HELLO VERSION MIN=3.1 MAX=3.3\n"); err != nil {
 		c.Close()
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	line, err := r.ReadString('\n')
+	line, err := readSAMLine(r)
 	if err != nil {
 		c.Close()
-		return nil, nil, fmt.Errorf("SAM handshake: %w", err)
+		return nil, nil, false, fmt.Errorf("SAM handshake: %w", err)
 	}
-	if !strings.Contains(line, "RESULT=OK") {
+	var version string
+	ok := false
+	for _, field := range strings.Fields(line) {
+		if field == "RESULT=OK" {
+			ok = true
+		}
+		if strings.HasPrefix(field, "VERSION=") {
+			version = strings.TrimPrefix(field, "VERSION=")
+		}
+	}
+	if !strings.HasPrefix(line, "HELLO REPLY ") || !ok || (version != "3.1" && version != "3.2" && version != "3.3") {
 		c.Close()
-		return nil, nil, fmt.Errorf("SAM handshake: %s", strings.TrimSpace(line))
+		return nil, nil, false, fmt.Errorf("SAM handshake: %s", strings.TrimSpace(line))
+	}
+	if err := ctx.Err(); err != nil {
+		c.Close()
+		return nil, nil, false, err
 	}
 	c.SetDeadline(time.Time{})
-	return c, r, nil
+	return c, r, version != "3.1", nil
 }
 
 func samResult(line string) (ok bool, msg string) {
@@ -107,7 +159,7 @@ func (s *samLinks) session(ctx context.Context, i int) {
 }
 
 func (s *samLinks) runSession(ctx context.Context, i int, id string) error {
-	c, r, err := samDial(ctx, s.addr)
+	c, r, keepalive, err := samDial(ctx, s.addr)
 	if err != nil {
 		s.mu.Lock()
 		s.samOK = false
@@ -115,17 +167,19 @@ func (s *samLinks) runSession(ctx context.Context, i int, id string) error {
 		return err
 	}
 	defer c.Close()
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
 	s.mu.Lock()
 	s.samOK = true
 	s.mu.Unlock()
-	go func() { <-ctx.Done(); c.Close() }()
-
 	cmd := fmt.Sprintf("SESSION CREATE STYLE=STREAM ID=%s DESTINATION=TRANSIENT SIGNATURE_TYPE=7 %s\n", id, s.options)
+	c.SetWriteDeadline(time.Now().Add(15 * time.Second))
 	if _, err := io.WriteString(c, cmd); err != nil {
 		return err
 	}
+	c.SetWriteDeadline(time.Time{})
 	c.SetReadDeadline(time.Now().Add(10 * time.Minute))
-	line, err := r.ReadString('\n')
+	line, err := readSAMReply(c, r, keepalive)
 	if err != nil {
 		return fmt.Errorf("SAM session: %w", err)
 	}
@@ -135,11 +189,15 @@ func (s *samLinks) runSession(ctx context.Context, i int, id string) error {
 	c.SetReadDeadline(time.Time{})
 	s.ready[i].Store(true)
 	s.ids[i].Store(id)
-	_, err = io.Copy(io.Discard, r)
-	if err == nil {
-		err = errors.New("SAM session closed by the router")
+	for {
+		line, err := readSAMReply(c, r, keepalive)
+		if err != nil {
+			return fmt.Errorf("SAM session closed: %w", err)
+		}
+		if ok, msg := samResult(line); !ok {
+			return fmt.Errorf("SAM session: %s", msg)
+		}
 	}
-	return err
 }
 
 type bufConn struct {
@@ -161,17 +219,21 @@ func (s *samLinks) connect(ctx context.Context, i int) (net.Conn, error) {
 	if v == nil || !s.ready[i].Load() {
 		return nil, errNotReady
 	}
-	c, r, err := samDial(ctx, s.addr)
+	c, r, keepalive, err := samDial(ctx, s.addr)
 	if err != nil {
 		return nil, err
 	}
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
 	cmd := fmt.Sprintf("STREAM CONNECT ID=%s DESTINATION=%s SILENT=false\n", v.(string), s.dest)
+	c.SetWriteDeadline(time.Now().Add(15 * time.Second))
 	if _, err := io.WriteString(c, cmd); err != nil {
 		c.Close()
 		return nil, err
 	}
+	c.SetWriteDeadline(time.Time{})
 	c.SetReadDeadline(time.Now().Add(2 * time.Minute))
-	line, err := r.ReadString('\n')
+	line, err := readSAMReply(c, r, keepalive)
 	if err != nil {
 		c.Close()
 		return nil, fmt.Errorf("SAM connect: %w", err)
@@ -179,6 +241,10 @@ func (s *samLinks) connect(ctx context.Context, i int) (net.Conn, error) {
 	if ok, msg := samResult(line); !ok {
 		c.Close()
 		return nil, fmt.Errorf("outproxy: %s", msg)
+	}
+	if err := ctx.Err(); err != nil {
+		c.Close()
+		return nil, err
 	}
 	c.SetReadDeadline(time.Time{})
 	return &bufConn{Conn: c, r: r}, nil
