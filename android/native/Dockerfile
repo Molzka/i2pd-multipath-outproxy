@@ -107,6 +107,8 @@ FROM ndk AS aggtunnel
 ARG API
 ARG ABI
 ARG AGG_VERSION=0.18.9
+ARG AGG_CORE_VERSION=0.9.9
+ARG AGG_CORE_SHA256=3084121a172a2b8b90d96e2fb619f3ac60aa87d2536ac7ebc39da739a1a07691
 ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
 ENV PATH=/opt/cargo/bin:$PATH
 RUN . abi-env && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
@@ -116,10 +118,21 @@ RUN . abi-env && if [ "$ABI" = x86_64 ]; then \
       && rm -rf /var/lib/apt/lists/* \
       && cargo install --locked bindgen-cli -j "$JOBS"; fi
 COPY multipath/agg-tunnel.patch /tmp/agg-tunnel.patch
+COPY multipath/aggligator-recovery.patch /tmp/aggligator-recovery.patch
+ARG AGG_SHA256=7d05321b694dcb9a1f9420a3b07b8e8698a9b64a76009abf7bcd8d2e842fb474
 RUN mkdir -p /src && cd /src \
-    && curl -fsSL https://crates.io/api/v1/crates/aggligator-util/${AGG_VERSION}/download | tar xz \
+    && curl -fsSL -o /tmp/aggligator.crate https://crates.io/api/v1/crates/aggligator/${AGG_CORE_VERSION}/download \
+    && echo "$AGG_CORE_SHA256  /tmp/aggligator.crate" | sha256sum -c - \
+    && tar xzf /tmp/aggligator.crate && rm /tmp/aggligator.crate \
+    && sed -i 's/\r$//' /tmp/aggligator-recovery.patch \
+    && patch -d aggligator-${AGG_CORE_VERSION} -p1 < /tmp/aggligator-recovery.patch \
+    && curl -fsSL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/aggligator-util.crate \
+         https://static.crates.io/crates/aggligator-util/aggligator-util-${AGG_VERSION}.crate \
+    && echo "$AGG_SHA256  /tmp/aggligator-util.crate" | sha256sum -c - \
+    && tar xzf /tmp/aggligator-util.crate && rm /tmp/aggligator-util.crate \
     && sed -i 's/\r$//' /tmp/agg-tunnel.patch \
-    && cd aggligator-util-${AGG_VERSION} && patch -p1 < /tmp/agg-tunnel.patch
+    && cd aggligator-util-${AGG_VERSION} && patch -p1 < /tmp/agg-tunnel.patch \
+    && mkdir -p .cargo && printf 'paths = ["../aggligator-%s"]\n' "$AGG_CORE_VERSION" > .cargo/config.toml
 ENV CARGO_PROFILE_RELEASE_LTO=true \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_STRIP=true

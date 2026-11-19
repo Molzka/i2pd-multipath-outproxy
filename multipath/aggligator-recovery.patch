@@ -1,0 +1,14 @@
+diff --git a/src/agg/task.rs b/src/agg/task.rs
+--- a/src/agg/task.rs
++++ b/src/agg/task.rs
+@@ -1630,7 +1630,9 @@
+                     if link.current_ping_sent.is_none() && !link.send_ping {
+                         // Ping has completed.
+ 
+-                        if link.roundtrip <= self.cfg.link_ack_timeout_max / 2
++                        // Liveness is bounded by the ping timeout. ACK retry timing
++                        // must not silently impose a stricter admission policy.
++                        if link.roundtrip <= self.cfg.link_ping_timeout
+                             && self
+                                 .cfg
+                                 .link_max_ping
