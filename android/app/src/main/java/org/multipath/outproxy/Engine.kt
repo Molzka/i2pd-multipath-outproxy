@@ -135,21 +135,13 @@ internal class Engine(
         for (p in processes) stopProcess(p)
     }
 
-    fun networkChanged(available: Boolean, changed: Boolean) {
+    fun networkChanged(available: Boolean) {
+        if (networkAvailable == available) return
         networkAvailable = available
         if (!running || cancelled) return
-        StatusBus.update { s -> s.copy(readySince = 0, rttMs = 0).let { it.copy(phase = phaseOf(it)) } }
-        if (!available || !changed) return
-        try {
-            for (name in listOf(MUX, AGG)) {
-                synchronized(procs) { procs.remove(name) }?.let { it.destroy(); stopProcess(it) }
-                restarts.remove(name)
-                retryAfter.remove(name)
-            }
-            startProcess(AGG)
-            startProcess(MUX)
-        } catch (e: Exception) {
-            fail(e.message ?: e.toString())
+        StatusBus.update { s ->
+            val next = if (available) s else s.copy(readySince = 0, rttMs = 0)
+            next.copy(phase = phaseOf(next))
         }
     }
 
@@ -508,7 +500,7 @@ internal class Engine(
         val j = try { JSONObject(line) } catch (_: Exception) { return }
         val state = j.optString("state")
         StatusBus.update { s ->
-            val ready = state == "ready" && synchronized(procs) {
+            val ready = networkAvailable && state == "ready" && synchronized(procs) {
                 processNames.all { procs[it]?.isAliveCompat() == true }
             }
             val next = s.copy(

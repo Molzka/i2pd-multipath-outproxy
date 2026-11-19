@@ -114,7 +114,8 @@ func runVPN(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open tun: %w", err)
 	}
-	stack, err := core.CreateStack(&core.Config{LinkEndpoint: dev, TransportHandler: tunnel.T()})
+	handler := &vpnTransport{ctx: ctx, client: client, udp: tunnel.T()}
+	stack, err := core.CreateStack(&core.Config{LinkEndpoint: dev, TransportHandler: handler})
 	if err != nil {
 		dev.Close()
 		return fmt.Errorf("create stack: %w", err)
