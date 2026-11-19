@@ -17,6 +17,8 @@ import (
 type Client struct {
 	upstream string
 	slots    []*slot
+	pickMu   sync.Mutex
+	nextPick int
 
 	up, down atomic.Int64
 }
@@ -35,6 +37,7 @@ type slot struct {
 	rttMs    atomic.Int64
 	sessions atomic.Int64
 	load     atomic.Int64
+	pending  atomic.Int64
 }
 
 func NewClient(upstream string, sessions int) *Client {
@@ -136,23 +139,30 @@ func (s *slot) connect(done chan struct{}, wait time.Duration) {
 }
 
 func (c *Client) pick() *slot {
+	c.pickMu.Lock()
+	defer c.pickMu.Unlock()
+	// Reserve an opening before waiting for the network. Otherwise a burst of
+	// requests all sees the same idle slot until its first handshake finishes.
 	var best *slot
-	for _, s := range c.slots {
-		if !s.ready.Load() || !s.live() {
-			continue
-		}
-		if best == nil || s.load.Load() < best.load.Load() {
-			best = s
-		}
-	}
-	if best == nil {
-		for _, s := range c.slots {
-			if s.live() {
-				return s
+	bestIndex, bestRank := 0, -1
+	var bestLoad int64
+	for offset := range c.slots {
+		i := (c.nextPick + offset) % len(c.slots)
+		s := c.slots[i]
+		rank := 0
+		if s.live() {
+			rank = 1
+			if s.ready.Load() {
+				rank = 2
 			}
 		}
-		return c.slots[0]
+		load := s.load.Load() + s.pending.Load()*(16<<10)
+		if best == nil || rank > bestRank || (rank == bestRank && load < bestLoad) {
+			best, bestIndex, bestRank, bestLoad = s, i, rank, load
+		}
 	}
+	best.pending.Add(1)
+	c.nextPick = (bestIndex + 1) % len(c.slots)
 	return best
 }
 
@@ -164,12 +174,21 @@ func (c *Client) open(ctx context.Context, cmd byte, a Addr) (*yamux.Stream, *sl
 		sl := c.pick()
 		s, err := sl.session(ctx)
 		if err != nil {
+			sl.pending.Add(-1)
 			return nil, nil, err
 		}
-		st, err := s.OpenStream()
+		st, err := s.OpenStreamContext(ctx)
 		if err != nil {
+			sl.pending.Add(-1)
 			lastErr = err
-			s.Close()
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			if errors.Is(err, yamux.ErrRemoteGoAway) || errors.Is(err, yamux.ErrStreamsExhausted) {
+				// These sessions can no longer admit streams. Cancellation of
+				// an individual opening, in contrast, must leave siblings alive.
+				s.Close()
+			}
 			continue
 		}
 		deadline, _ := ctx.Deadline()
@@ -189,10 +208,12 @@ func (c *Client) open(ctx context.Context, cmd byte, a Addr) (*yamux.Stream, *sl
 		}
 		if err != nil {
 			st.Abort()
+			sl.pending.Add(-1)
 			return nil, nil, err
 		}
 		st.SetDeadline(time.Time{})
 		sl.load.Add(16 << 10)
+		sl.pending.Add(-1)
 		return st, sl, nil
 	}
 	return nil, nil, lastErr

@@ -2,7 +2,7 @@ package yamux
 
 import (
 	"bytes"
-	"errors"
+	"context"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -40,11 +40,9 @@ type Stream struct {
 	recvLock sync.Mutex
 
 	controlHdr     header
-	controlErr     chan error
 	controlHdrLock sync.Mutex
 
 	sendHdr  header
-	sendErr  chan error
 	sendLock sync.Mutex
 
 	recvNotifyCh chan struct{}
@@ -54,6 +52,8 @@ type Stream struct {
 	writeDeadline atomic.Value
 
 	establishCh chan struct{}
+	abortCh     chan struct{}
+	abortOnce   sync.Once
 
 	closeTimer *time.Timer
 }
@@ -64,14 +64,13 @@ func newStream(session *Session, id uint32, state streamState) *Stream {
 		session:      session,
 		state:        state,
 		controlHdr:   header(make([]byte, headerSize)),
-		controlErr:   make(chan error, 1),
 		sendHdr:      header(make([]byte, headerSize)),
-		sendErr:      make(chan error, 1),
 		recvWindow:   initialStreamWindow,
 		sendWindow:   initialStreamWindow,
 		recvNotifyCh: make(chan struct{}, 1),
 		sendNotifyCh: make(chan struct{}, 1),
 		establishCh:  make(chan struct{}, 1),
+		abortCh:      make(chan struct{}),
 	}
 	s.recvWindowMax = session.config.MaxStreamWindowSize
 	if start := session.config.StartStreamWindowSize; start > 0 && start < s.recvWindowMax {
@@ -142,7 +141,17 @@ START:
 	s.recvLock.Lock()
 	if s.recvBuf == nil || s.recvBuf.Len() == 0 {
 		s.recvWaited = true
+		refill := s.recvWindow == 0
 		s.recvLock.Unlock()
+		if refill {
+			// A queued credit update may have timed out after the last bytes
+			// were consumed. Retry it before waiting: the peer has no credit
+			// left to send the data that would otherwise wake this reader.
+			if err := s.sendWindowUpdate(); err != nil {
+				return 0, err
+			}
+			goto START
+		}
 		goto WAIT
 	}
 
@@ -150,6 +159,9 @@ START:
 	s.shrinkRecvBuf()
 	s.recvLock.Unlock()
 
+	if s.session.IsClosed() {
+		return n, nil
+	}
 	err = s.sendWindowUpdate()
 	if err == ErrSessionShutdown {
 		err = nil
@@ -211,6 +223,9 @@ START:
 	}
 	s.stateLock.Unlock()
 
+	if deadline := s.writeDeadline.Load().(time.Time); !deadline.IsZero() && !time.Now().Before(deadline) {
+		return 0, ErrTimeout
+	}
 	window := atomic.LoadUint32(&s.sendWindow)
 	if window == 0 {
 		goto WAIT
@@ -222,10 +237,10 @@ START:
 	body = b[:max]
 
 	s.sendHdr.encode(typeData, flags, s.id, max)
-	if err = s.session.waitForSendErr(s.sendHdr, body, s.sendErr); err != nil {
-		if errors.Is(err, ErrSessionShutdown) || errors.Is(err, ErrConnectionWriteTimeout) {
-			s.sendHdr = header(make([]byte, headerSize))
-		}
+	if err = s.session.waitForSendErr(s.sendHdr, body, sendWait{
+		closed: s.abortCh, notify: s.sendNotifyCh,
+		deadline: func() time.Time { return s.writeDeadline.Load().(time.Time) },
+	}); err != nil {
 		return 0, err
 	}
 
@@ -272,9 +287,14 @@ func (s *Stream) sendFlags() uint16 {
 }
 
 func (s *Stream) sendWindowUpdate() error {
+	return s.sendWindowUpdateContext(context.Background())
+}
+
+func (s *Stream) sendWindowUpdateContext(ctx context.Context) error {
 	s.controlHdrLock.Lock()
 	defer s.controlHdrLock.Unlock()
 
+	flags := s.sendFlags()
 	var bufLen uint32
 	s.recvLock.Lock()
 	max := s.recvWindowMax
@@ -282,8 +302,6 @@ func (s *Stream) sendWindowUpdate() error {
 		bufLen = uint32(s.recvBuf.Len())
 	}
 	delta := s.recvDelta(max, bufLen)
-
-	flags := s.sendFlags()
 
 	if delta < (max/2) && flags == 0 {
 		s.recvLock.Unlock()
@@ -309,10 +327,16 @@ func (s *Stream) sendWindowUpdate() error {
 	s.recvLock.Unlock()
 
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, delta)
-	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
-		if errors.Is(err, ErrSessionShutdown) || errors.Is(err, ErrConnectionWriteTimeout) {
-			s.controlHdr = header(make([]byte, headerSize))
-		}
+	if err := s.session.waitForSendErr(s.controlHdr, nil, sendWait{
+		ctx: ctx, closed: s.abortCh, notify: s.recvNotifyCh,
+		deadline: func() time.Time { return s.readDeadline.Load().(time.Time) },
+	}); err != nil {
+		// A canceled queued update advertised no credit. Roll it back so a
+		// caller can refresh its read deadline and continue the same stream.
+		// A failed in-flight frame has already closed the shared transport.
+		s.recvLock.Lock()
+		s.recvWindow -= delta
+		s.recvLock.Unlock()
 		return err
 	}
 	return nil
@@ -325,10 +349,7 @@ func (s *Stream) sendClose() error {
 	flags := s.sendFlags()
 	flags |= flagFIN
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, 0)
-	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
-		if errors.Is(err, ErrSessionShutdown) || errors.Is(err, ErrConnectionWriteTimeout) {
-			s.controlHdr = header(make([]byte, headerSize))
-		}
+	if err := s.session.waitForSendErr(s.controlHdr, nil, sendWait{closed: s.abortCh}); err != nil {
 		return err
 	}
 	return nil
@@ -379,25 +400,19 @@ SEND_CLOSE:
 	return nil
 }
 
-func (s *Stream) Abort() error {
-	s.recvLock.Lock()
-	pending := s.recvBuf != nil && s.recvBuf.Len() > 0
-	s.recvDiscard = true
-	s.recvLock.Unlock()
-	if pending {
-		return s.Reset()
-	}
-	return s.Close()
-}
+// Abort ends both directions immediately. Close remains a graceful half-close.
+func (s *Stream) Abort() error { return s.Reset() }
 
 func (s *Stream) Reset() error {
 	s.stateLock.Lock()
+	closed := s.state == streamClosed
 	switch s.state {
-	case streamClosed, streamReset:
+	case streamReset:
 		s.stateLock.Unlock()
 		return nil
 	}
 	s.state = streamReset
+	s.abortOnce.Do(func() { close(s.abortCh) })
 	if s.closeTimer != nil {
 		s.closeTimer.Stop()
 		s.closeTimer = nil
@@ -405,14 +420,21 @@ func (s *Stream) Reset() error {
 	s.stateLock.Unlock()
 
 	s.recvLock.Lock()
+	s.recvDiscard = true
 	s.recvBuf = nil
 	s.recvLock.Unlock()
 	s.notifyWaiting()
 	s.session.closeStream(s.id)
+	if closed {
+		return nil
+	}
 
 	hdr := header(make([]byte, headerSize))
 	hdr.encode(typeWindowUpdate, flagRST, s.id, 0)
-	return s.session.sendNoWait(hdr)
+	// Local cancellation must not wait behind another stream's frame. This
+	// bounded notification may wait for queue space, but no caller I/O does.
+	go func() { _ = s.session.sendNoWait(hdr) }()
+	return nil
 }
 
 func (s *Stream) closeTimeout() {
@@ -430,6 +452,7 @@ func (s *Stream) closeTimeout() {
 func (s *Stream) forceClose() {
 	s.stateLock.Lock()
 	s.state = streamClosed
+	s.abortOnce.Do(func() { close(s.abortCh) })
 	s.stateLock.Unlock()
 	s.notifyWaiting()
 }
@@ -469,6 +492,9 @@ func (s *Stream) processFlags(flags uint16) error {
 			s.state = streamClosed
 			closeStream = true
 			s.notifyWaiting()
+		case streamReset:
+			// Local Abort may race a FIN whose frame is already being read.
+			// The reset stream is gone; that FIN must not kill its siblings.
 		default:
 			s.session.logger.Printf("[ERR] yamux: unexpected FIN flag in state %d", s.state)
 			return ErrUnexpectedFlag
@@ -476,6 +502,10 @@ func (s *Stream) processFlags(flags uint16) error {
 	}
 	if flags&flagRST == flagRST {
 		s.state = streamReset
+		s.abortOnce.Do(func() { close(s.abortCh) })
+		s.recvLock.Lock()
+		s.recvDiscard, s.recvBuf = true, nil
+		s.recvLock.Unlock()
 		closeStream = true
 		s.notifyWaiting()
 	}
@@ -499,49 +529,55 @@ func (s *Stream) incrSendWindow(hdr header, flags uint16) error {
 }
 
 func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
-	if err := s.processFlags(flags); err != nil {
+	// FIN belongs after the body; publishing it first can let a reader see
+	// EOF before the final data is in its buffer.
+	if err := s.processFlags(flags &^ flagFIN); err != nil {
 		return err
 	}
 
 	length := hdr.Length()
 	if length == 0 {
-		return nil
+		return s.processFlags(flags & flagFIN)
 	}
-
-	conn = &io.LimitedReader{R: conn, N: int64(length)}
-
 	s.recvLock.Lock()
-
-	if s.recvDiscard {
-		s.recvLock.Unlock()
-		if _, err := io.Copy(io.Discard, conn); err != nil {
-			return err
-		}
-		s.Reset()
-		return nil
-	}
-
-	if length > s.recvWindow {
+	if !s.recvDiscard && length > s.recvWindow {
 		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, s.recvWindow, length)
 		s.recvLock.Unlock()
 		return ErrRecvWindowExceeded
 	}
-
-	if s.recvBuf == nil {
-		s.recvBuf = bytes.NewBuffer(make([]byte, 0, length))
-	}
-	copiedLength, err := io.Copy(s.recvBuf, conn)
-	if err != nil {
-		s.session.logger.Printf("[ERR] yamux: Failed to read stream data: %v", err)
-		s.recvLock.Unlock()
-		return err
-	}
-
-	s.recvWindow -= uint32(copiedLength)
 	s.recvLock.Unlock()
-
-	asyncNotify(s.recvNotifyCh)
-	return nil
+	for remaining := length; remaining > 0; {
+		// Only the session receive loop uses recvBuffer. Never hold recvLock
+		// during socket I/O: an incomplete frame must not block local Abort.
+		buf := s.session.recvBuffer[:min(remaining, uint32(len(s.session.recvBuffer)))]
+		n, err := conn.Read(buf)
+		if n > 0 {
+			s.recvLock.Lock()
+			if !s.recvDiscard {
+				if s.recvBuf == nil {
+					s.recvBuf = bytes.NewBuffer(make([]byte, 0, n))
+				}
+				s.recvBuf.Write(buf[:n])
+				s.recvWindow -= uint32(n)
+			}
+			s.recvLock.Unlock()
+			remaining -= uint32(n)
+			asyncNotify(s.recvNotifyCh)
+		}
+		if err != nil {
+			if err == io.EOF && remaining > 0 {
+				err = io.ErrUnexpectedEOF
+			}
+			return err
+		}
+	}
+	s.recvLock.Lock()
+	discard := s.recvDiscard
+	s.recvLock.Unlock()
+	if discard {
+		return nil
+	}
+	return s.processFlags(flags & flagFIN)
 }
 
 func (s *Stream) SetDeadline(t time.Time) error {

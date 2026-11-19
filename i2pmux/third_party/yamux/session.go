@@ -29,7 +29,8 @@ type Session struct {
 
 	conn io.ReadWriteCloser
 
-	bufRead *bufio.Reader
+	bufRead    *bufio.Reader
+	recvBuffer [32 << 10]byte
 
 	pings    map[uint32]chan struct{}
 	pingID   uint32
@@ -56,10 +57,48 @@ type Session struct {
 }
 
 type sendReady struct {
-	Hdr  []byte
-	mu   sync.Mutex
-	Body []byte
-	Err  chan error
+	Hdr      []byte
+	mu       sync.Mutex
+	Body     []byte
+	Err      chan error
+	wait     sendWait
+	expires  time.Time
+	started  bool
+	canceled bool
+	finished bool
+}
+
+// sendWait describes the operation that owns a frame. Deadlines are loaded
+// again after notifications, so SetWriteDeadline also affects pending writes.
+type sendWait struct {
+	ctx      context.Context
+	closed   <-chan struct{}
+	deadline func() time.Time
+	notify   <-chan struct{}
+}
+
+func (w sendWait) err() error {
+	if w.ctx != nil && w.ctx.Err() != nil {
+		return w.ctx.Err()
+	}
+	select {
+	case <-w.closed:
+		return ErrConnectionReset
+	default:
+	}
+	if w.deadline != nil {
+		if deadline := w.deadline(); !deadline.IsZero() && !time.Now().Before(deadline) {
+			return ErrTimeout
+		}
+	}
+	return nil
+}
+
+func (r *sendReady) finish(err error) {
+	r.mu.Lock()
+	r.finished = true
+	asyncSendErr(r.Err, err)
+	r.mu.Unlock()
 }
 
 func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
@@ -125,6 +164,15 @@ func (s *Session) Open() (net.Conn, error) {
 }
 
 func (s *Session) OpenStream() (*Stream, error) {
+	return s.OpenStreamContext(context.Background())
+}
+
+// OpenStreamContext opens a stream without waiting for the peer's ACK, like
+// OpenStream. The context bounds admission and sending the opening frame.
+func (s *Session) OpenStreamContext(ctx context.Context) (*Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s.IsClosed() {
 		return nil, ErrSessionShutdown
 	}
@@ -134,13 +182,20 @@ func (s *Session) OpenStream() (*Stream, error) {
 
 	select {
 	case s.synCh <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-s.shutdownCh:
 		return nil, ErrSessionShutdown
+	}
+	if err := ctx.Err(); err != nil {
+		<-s.synCh
+		return nil, err
 	}
 
 GET_ID:
 	id := atomic.LoadUint32(&s.nextStreamID)
 	if id >= math.MaxUint32-1 {
+		<-s.synCh
 		return nil, ErrStreamsExhausted
 	}
 	if !atomic.CompareAndSwapUint32(&s.nextStreamID, id, id+2) {
@@ -157,12 +212,8 @@ GET_ID:
 		go s.setOpenTimeout(stream)
 	}
 
-	if err := stream.sendWindowUpdate(); err != nil {
-		select {
-		case <-s.synCh:
-		default:
-			s.logger.Printf("[ERR] yamux: aborted stream open without inflight syn semaphore")
-		}
+	if err := stream.sendWindowUpdateContext(ctx); err != nil {
+		stream.Abort()
 		return nil, err
 	}
 	return stream, nil
@@ -315,14 +366,15 @@ func (s *Session) keepalive() {
 }
 
 func (s *Session) waitForSend(hdr header, body []byte) error {
-	errCh := make(chan error, 1)
-	return s.waitForSendErr(hdr, body, errCh)
+	return s.waitForSendErr(hdr, body, sendWait{})
 }
 
-func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) error {
+func (s *Session) waitForSendErr(hdr header, body []byte, wait sendWait) error {
+	if err := wait.err(); err != nil {
+		return err
+	}
 	t := timerPool.Get()
 	timer := t.(*time.Timer)
-	timer.Reset(s.config.ConnectionWriteTimeout)
 	defer func() {
 		timer.Stop()
 		select {
@@ -332,41 +384,72 @@ func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) erro
 		timerPool.Put(t)
 	}()
 
-	ready := &sendReady{Hdr: hdr, Body: body, Err: errCh}
-	select {
-	case s.sendCh <- ready:
-	case <-s.shutdownCh:
-		return ErrSessionShutdown
-	case <-timer.C:
-		return ErrConnectionWriteTimeout
+	ready := &sendReady{
+		Hdr: append([]byte(nil), hdr...), Body: body, Err: make(chan error, 1),
+		wait: wait, expires: time.Now().Add(s.config.ConnectionWriteTimeout),
 	}
-
-	bodyCopy := func() {
-		if body == nil {
-			return
+	queue := s.sendCh
+	var canceled <-chan struct{}
+	if wait.ctx != nil {
+		canceled = wait.ctx.Done()
+	}
+	for {
+		if err := wait.err(); err != nil {
+			return s.cancelSend(ready, err)
 		}
-
-		ready.mu.Lock()
-		defer ready.mu.Unlock()
-
-		if ready.Body == nil {
-			return
+		deadline := ready.expires
+		if wait.deadline != nil {
+			if d := wait.deadline(); !d.IsZero() && d.Before(deadline) {
+				deadline = d
+			}
 		}
-		newBody := make([]byte, len(body))
-		copy(newBody, body)
-		ready.Body = newBody
+		timer.Stop()
+		select {
+		case <-timer.C:
+		default:
+		}
+		timer.Reset(time.Until(deadline))
+		select {
+		case queue <- ready:
+			queue = nil
+		case err := <-ready.Err:
+			return err
+		case <-s.shutdownCh:
+			return s.cancelSend(ready, ErrSessionShutdown)
+		case <-canceled:
+			return s.cancelSend(ready, wait.ctx.Err())
+		case <-wait.closed:
+			return s.cancelSend(ready, ErrConnectionReset)
+		case <-wait.notify:
+		case <-timer.C:
+			// A deadline may have been extended at the same time as this timer.
+			if err := wait.err(); err != nil {
+				return s.cancelSend(ready, err)
+			}
+			if !time.Now().Before(ready.expires) {
+				return s.cancelSend(ready, ErrConnectionWriteTimeout)
+			}
+		}
 	}
+}
 
-	select {
-	case err := <-errCh:
-		return err
-	case <-s.shutdownCh:
-		bodyCopy()
-		return ErrSessionShutdown
-	case <-timer.C:
-		bodyCopy()
-		return ErrConnectionWriteTimeout
+func (s *Session) cancelSend(ready *sendReady, err error) error {
+	ready.mu.Lock()
+	if ready.finished {
+		ready.mu.Unlock()
+		return <-ready.Err
 	}
+	ready.canceled = true
+	ready.Body = nil
+	started := ready.started
+	ready.mu.Unlock()
+	if started {
+		// A partial frame cannot be skipped on a shared byte stream. Closing
+		// the transport unblocks its writer and prevents framing corruption.
+		s.conn.Close()
+		go s.exitErr(err)
+	}
+	return err
 }
 
 func (s *Session) sendNoWait(hdr header) error {
@@ -383,7 +466,7 @@ func (s *Session) sendNoWait(hdr header) error {
 	}()
 
 	select {
-	case s.sendCh <- &sendReady{Hdr: hdr}:
+	case s.sendCh <- &sendReady{Hdr: hdr, expires: time.Now().Add(s.config.ConnectionWriteTimeout)}:
 		return nil
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
@@ -406,39 +489,42 @@ func (s *Session) sendLoop() error {
 
 		select {
 		case ready := <-s.sendCh:
-			if ready.Hdr != nil {
-				_, err := s.conn.Write(ready.Hdr)
-				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
-				}
-			}
-
 			ready.mu.Lock()
-			if ready.Body != nil {
-				_, err := bodyBuf.Write(ready.Body)
-				if err != nil {
-					ready.Body = nil
-					ready.mu.Unlock()
-					s.logger.Printf("[ERR] yamux: Failed to copy body into buffer: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
-				}
-				ready.Body = nil
+			if ready.canceled {
+				ready.mu.Unlock()
+				continue
 			}
+			err := ready.wait.err()
+			if err == nil && !time.Now().Before(ready.expires) {
+				err = ErrConnectionWriteTimeout
+			}
+			if err != nil {
+				ready.Body = nil
+				ready.mu.Unlock()
+				ready.finish(err)
+				continue
+			}
+			bodyBuf.Write(ready.Body)
+			ready.Body = nil
+			ready.started = true
 			ready.mu.Unlock()
 
-			if bodyBuf.Len() > 0 {
-				_, err := s.conn.Write(bodyBuf.Bytes())
-				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
+			if conn, ok := s.conn.(interface{ SetWriteDeadline(time.Time) error }); ok {
+				err = conn.SetWriteDeadline(ready.expires)
+			}
+			for _, part := range [][]byte{ready.Hdr, bodyBuf.Bytes()} {
+				if err == nil && len(part) > 0 {
+					var n int
+					n, err = s.conn.Write(part)
+					if err == nil && n != len(part) {
+						err = io.ErrShortWrite
+					}
 				}
 			}
-
-			asyncSendErr(ready.Err, nil)
+			ready.finish(err)
+			if err != nil {
+				return err
+			}
 		case <-s.shutdownCh:
 			return nil
 		}
@@ -585,9 +671,9 @@ func (s *Session) incomingStream(id uint32) error {
 	stream := newStream(s, id, streamSYNReceived)
 
 	s.streamLock.Lock()
-	defer s.streamLock.Unlock()
 
 	if _, ok := s.streams[id]; ok {
+		s.streamLock.Unlock()
 		s.logger.Printf("[ERR] yamux: duplicate stream declared")
 		if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
 			s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
@@ -599,10 +685,12 @@ func (s *Session) incomingStream(id uint32) error {
 
 	select {
 	case s.acceptCh <- stream:
+		s.streamLock.Unlock()
 		return nil
 	default:
 		s.logger.Printf("[WARN] yamux: backlog exceeded, forcing connection reset")
 		delete(s.streams, id)
+		s.streamLock.Unlock()
 		hdr := header(make([]byte, headerSize))
 		hdr.encode(typeWindowUpdate, flagRST, id, 0)
 		return s.sendNoWait(hdr)
@@ -612,6 +700,7 @@ func (s *Session) incomingStream(id uint32) error {
 func (s *Session) closeStream(id uint32) {
 	s.streamLock.Lock()
 	if _, ok := s.inflight[id]; ok {
+		delete(s.inflight, id)
 		select {
 		case <-s.synCh:
 		default:
@@ -626,13 +715,11 @@ func (s *Session) establishStream(id uint32) {
 	s.streamLock.Lock()
 	if _, ok := s.inflight[id]; ok {
 		delete(s.inflight, id)
-	} else {
-		s.logger.Printf("[ERR] yamux: established stream without inflight SYN (no tracking entry)")
-	}
-	select {
-	case <-s.synCh:
-	default:
-		s.logger.Printf("[ERR] yamux: established stream without inflight SYN (didn't have semaphore)")
+		select {
+		case <-s.synCh:
+		default:
+			s.logger.Printf("[ERR] yamux: established stream without inflight SYN (didn't have semaphore)")
+		}
 	}
 	s.streamLock.Unlock()
 }
